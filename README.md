@@ -79,8 +79,6 @@ No need to recompile the game after modifying players.ini or players.xml.
 Fallback Defaults.
 Plan to tackle order player,items,spell
 
-<ModConfig>
-    <Enable>true</Enable>
     <Players>
         <!-- Warrior Class -->
         <Player class="Warrior" Enabled="true">
@@ -191,10 +189,6 @@ Plan to tackle order player,items,spell
             </Items>
             <GraphProfile>Warrior</GraphProfile> <!-- Uses Warrior's graphics as default -->
         </Player>
-    </Players>
-</ModConfig>
-
-
 
 # Test Builds
 
