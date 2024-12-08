@@ -76,9 +76,125 @@ Toggle custom classes on/off via configuration files.
 Easy Integration:
 
 No need to recompile the game after modifying players.ini or players.xml.
-Fallback Defaults:
+Fallback Defaults.
+Plan to tackle order player,items,spell
 
-If no mod file is present or a mod is disabled, the game falls back to its default settings.
+players.xml
+<ModConfig>
+    <Enable>true</Enable>
+    <Players>
+        <!-- Warrior Class -->
+        <Player class="Warrior" Enabled="true">
+            <Stats>
+                <Might>30</Might> <!-- Warrior base strength -->
+                <Agility>20</Agility> <!-- Warrior base dexterity -->
+                <Intellect>10</Intellect> <!-- Warrior base magic -->
+                <Presence>25</Presence> <!-- Warrior base vitality -->
+            </Stats>
+            <Derived>
+                <HealthBase>45</HealthBase> <!-- Derived from vitality -->
+                <ManaBase>0</ManaBase> <!-- Warrior starts with no mana -->
+            </Derived>
+            <Items>
+                <Weapon>ShortSword</Weapon> <!-- Warrior's starting weapon -->
+                <Armor>QuiltedArmor</Armor> <!-- Warrior's starting armor -->
+                <Shield>SmallShield</Shield> <!-- Warrior's starting shield -->
+                <Potion>HealingPotion</Potion> <!-- Default starting potion -->
+                <Spell>None</Spell> <!-- Warrior does not start with spells -->
+            </Items>
+            <GraphProfile>Warrior</GraphProfile>
+        </Player>
+
+        <!-- Rogue Class -->
+        <Player class="Rogue" Enabled="true">
+            <Stats>
+                <Might>20</Might> <!-- Rogue base strength -->
+                <Agility>30</Agility> <!-- Rogue base dexterity -->
+                <Intellect>15</Intellect> <!-- Rogue base magic -->
+                <Presence>20</Presence> <!-- Rogue base vitality -->
+            </Stats>
+            <Derived>
+                <HealthBase>35</HealthBase> <!-- Derived from vitality -->
+                <ManaBase>20</ManaBase> <!-- Rogue starts with some mana -->
+            </Derived>
+            <Items>
+                <Weapon>ShortBow</Weapon> <!-- Rogue's starting weapon -->
+                <Armor>LeatherArmor</Armor> <!-- Rogue's starting armor -->
+                <Shield>None</Shield> <!-- Rogue does not use shields -->
+                <Potion>HealingPotion</Potion> <!-- Default starting potion -->
+                <Spell>None</Spell> <!-- Rogue does not start with spells -->
+            </Items>
+            <GraphProfile>Rogue</GraphProfile>
+        </Player>
+
+        <!-- Sorcerer Class -->
+        <Player class="Sorcerer" Enabled="true">
+            <Stats>
+                <Might>15</Might> <!-- Sorcerer base strength -->
+                <Agility>25</Agility> <!-- Sorcerer base dexterity -->
+                <Intellect>35</Intellect> <!-- Sorcerer base magic -->
+                <Presence>20</Presence> <!-- Sorcerer base vitality -->
+            </Stats>
+            <Derived>
+                <HealthBase>30</HealthBase> <!-- Derived from vitality -->
+                <ManaBase>35</ManaBase> <!-- Sorcerer starts with significant mana -->
+            </Derived>
+            <Items>
+                <Weapon>Staff</Weapon> <!-- Sorcerer's starting weapon -->
+                <Armor>Cloak</Armor> <!-- Sorcerer's starting armor -->
+                <Shield>None</Shield> <!-- Sorcerer does not use shields -->
+                <Potion>ManaPotion</Potion> <!-- Default starting potion -->
+                <Spell>Firebolt</Spell> <!-- Sorcerer's starting spell -->
+            </Items>
+            <GraphProfile>Sorcerer</GraphProfile>
+        </Player>
+
+        <!-- Monk Class (Hellfire) -->
+        <Player class="Monk" Enabled="false">
+            <Stats>
+                <Might>25</Might> <!-- Monk is strong but agile -->
+                <Agility>25</Agility> <!-- Monk focuses on dexterity -->
+                <Intellect>15</Intellect> <!-- Moderate magic use -->
+                <Presence>20</Presence> <!-- Balanced vitality -->
+            </Stats>
+            <Derived>
+                <HealthBase>40</HealthBase> <!-- Derived from vitality -->
+                <ManaBase>20</ManaBase> <!-- Moderate starting mana -->
+            </Derived>
+            <Items>
+                <Weapon>Staff</Weapon> <!-- Monk begins with a staff -->
+                <Armor>QuiltedArmor</Armor> <!-- Light starting armor -->
+                <Shield>None</Shield> <!-- Monks typically avoid shields -->
+                <Potion>HealingPotion</Potion> <!-- Default starting potion -->
+                <Spell>None</Spell> <!-- Monk does not start with spells -->
+            </Items>
+            <GraphProfile>Sorcerer</GraphProfile> <!-- Monk uses Sorcerer graphics -->
+        </Player>
+
+        <!-- Custom Class: Cleric -->
+        <Player class="Cleric" Enabled="false">
+            <Stats>
+                <Might>20</Might> <!-- Strong but not Warrior-level -->
+                <Agility>15</Agility> <!-- Agile enough to wear lighter armor -->
+                <Intellect>20</Intellect> <!-- Good spellcasting ability -->
+                <Presence>30</Presence> <!-- High presence for healing and resilience -->
+            </Stats>
+            <Derived>
+                <HealthBase>40</HealthBase>
+                <ManaBase>35</ManaBase>
+            </Derived>
+            <Items>
+                <Weapon>Mace</Weapon> <!-- Cleric begins with a mace -->
+                <Armor>Robe</Armor> <!-- Cleric begins with light armor -->
+                <Shield>SmallShield</Shield> <!-- Cleric uses a shield -->
+                <Potion>HealingPotion</Potion> <!-- Default starting potion -->
+                <Spell>Heal</Spell> <!-- Cleric begins with a healing spell -->
+            </Items>
+            <GraphProfile>Warrior</GraphProfile> <!-- Uses Warrior's graphics as default -->
+        </Player>
+    </Players>
+</ModConfig>
+
 
 # Test Builds
 
