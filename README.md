@@ -79,7 +79,6 @@ No need to recompile the game after modifying players.ini or players.xml.
 Fallback Defaults.
 Plan to tackle order player,items,spell
 
-players.xml
 <ModConfig>
     <Enable>true</Enable>
     <Players>
@@ -194,6 +193,7 @@ players.xml
         </Player>
     </Players>
 </ModConfig>
+
 
 
 # Test Builds
