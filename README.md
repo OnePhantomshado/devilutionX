@@ -41,6 +41,45 @@ We are always looking for more people to help with [coding](docs/CONTRIBUTING.md
 
 We hope to provide a good starting point for mods. In addition to the full Devilution source code, we also provide modding tools. Check out the list of known [mods based on DevilutionX](https://github.com/diasurgical/devilutionX/wiki/Mods).
 
+DevilutionX - Custom Modding Project
+
+
+Overview
+This fork of DevilutionX introduces a flexible and user-friendly modding system to allow players and developers to customize gameplay, character classes, items, and more without requiring recompilation. The goal is to make DevilutionX more accessible to modders while maintaining the original charm of Diablo 1.
+
+Goals
+Simplified Modding:
+
+Enable users to modify game configurations (e.g., player stats, items, and classes) using external files such as INI or XML.
+Ensure changes can be applied without recompiling the game.
+Expand Customization:
+
+Allow the addition of new player classes, abilities, and items.
+Include support for toggling custom classes on/off for easy experimentation.
+Maintain Compatibility:
+
+Retain the core DevilutionX experience while adding modding flexibility.
+Ensure base game functionality is not disrupted.
+User-Friendly:
+
+Design the modding system with accessibility in mind, so even non-technical users can easily create and apply mods.
+Modding System Features
+External Modding Files:
+
+Mods are stored in a dedicated mods/ folder outside the compiled program for easy access.
+Supports both INI (for simple configurations) and XML (for complex data).
+Dynamic Player Classes:
+
+Edit base classes (Warrior, Rogue, Sorcerer) or add custom classes like Cleric or Druid.
+Define attributes such as stats, starting items, mana, and abilities.
+Toggle custom classes on/off via configuration files.
+Easy Integration:
+
+No need to recompile the game after modifying players.ini or players.xml.
+Fallback Defaults:
+
+If no mod file is present or a mod is disabled, the game falls back to its default settings.
+
 # Test Builds
 
 If you want to help test the latest development version (make sure to back up your files, as these may contain bugs), you can fetch the test build artifact from one of the build servers:
