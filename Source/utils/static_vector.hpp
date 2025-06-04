@@ -22,7 +22,12 @@ public:
 	using value_type = T;
 	using reference = T &;
 	using const_reference = const T &;
+	using pointer = T *;
+	using const_pointer = const T *;
 	using size_type = size_t;
+	using iterator = T *;
+	using const_iterator = const T *;
+	using difference_type = std::ptrdiff_t;
 
 	StaticVector() = default;
 
@@ -50,6 +55,9 @@ public:
 	[[nodiscard]] const T &back() const { return (*this)[size_ - 1]; }
 	[[nodiscard]] T &back() { return (*this)[size_ - 1]; }
 
+	[[nodiscard]] const T *data() const { return data_[0].ptr(); }
+	[[nodiscard]] T *data() { return data_[0].ptr(); }
+
 	template <typename... Args>
 	void push_back(Args &&...args) // NOLINT(readability-identifier-naming)
 	{
@@ -66,12 +74,20 @@ public:
 	const T &operator[](std::size_t pos) const { return *data_[pos].ptr(); }
 	T &operator[](std::size_t pos) { return *data_[pos].ptr(); }
 
-	void erase(const T *begin, const T *end)
+	void erase(const T *first, const T *last)
 	{
-		for (const T *it = begin; it < end; ++it) {
-			std::destroy_at(it);
-		}
-		size_ -= end - begin;
+		if (last == first) return;
+		assert(first >= begin() && last <= end() && first <= last);
+		const auto count = last - first;
+		auto tail = std::move(const_cast<T *>(last), end(), const_cast<T *>(first));
+		std::destroy(tail, end());
+		size_ -= count;
+	}
+
+	void erase(const T *element)
+	{
+		assert(element >= begin() && element < end());
+		erase(element, element + 1);
 	}
 
 	void pop_back() // NOLINT(readability-identifier-naming)

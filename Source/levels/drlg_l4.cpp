@@ -14,6 +14,7 @@
 #include "multi.h"
 #include "objdat.h"
 #include "player.h"
+#include "utils/is_of.hpp"
 
 namespace devilution {
 
@@ -1194,7 +1195,7 @@ void GenerateLevel(lvl_entry entry)
 	DRLG_CheckQuests(SetPieceRoom.position);
 
 	if (currlevel == 15) {
-		bool isGateOpen = UseMultiplayerQuests() || Quests[Q_DIABLO]._qactive == QUEST_ACTIVE;
+		bool isGateOpen = UseMultiplayerQuests() || IsAnyOf(Quests[Q_DIABLO]._qactive, QUEST_ACTIVE, QUEST_DONE);
 		if (!isGateOpen)
 			L4PENTA.place(Quests[Q_DIABLO].position);
 

@@ -389,21 +389,14 @@ enum _cmd_id : uint8_t {
 	//
 	// body (TCmdPItem)
 	CMD_SYNCPUTITEM,
-	// Golem death at location.
-	//
-	// body (TCmdLocParam1):
-	//    int8_t x
-	//    int8_t y
-	//    int16_t dlvl
-	CMD_KILLGOLEM,
 	// Synchronize quest state.
 	//
 	// body (TCmdQuest)
 	CMD_SYNCQUEST,
-	// Spawn golem at target location.
+	// Request to spawn a golem at target location.
 	//
-	// body (TCmdGolem)
-	CMD_AWAKEGOLEM,
+	// body (TCmdLocParam1)
+	CMD_REQUESTSPAWNGOLEM,
 	// Enable mana shield of player (render).
 	//
 	// body (TCmd)
@@ -499,23 +492,12 @@ struct TCmdParam2 {
 	uint16_t wParam2;
 };
 
-struct TCmdParam5 {
+struct TCmdParam4 {
 	_cmd_id bCmd;
 	uint16_t wParam1;
 	uint16_t wParam2;
 	uint16_t wParam3;
 	uint16_t wParam4;
-	uint16_t wParam5;
-};
-
-struct TCmdGolem {
-	_cmd_id bCmd;
-	uint8_t _mx;
-	uint8_t _my;
-	Direction _mdir;
-	int8_t _menemy;
-	int32_t _mhitpoints;
-	uint8_t _currlevel;
 };
 
 struct TCmdSpawnMonster {
@@ -526,6 +508,8 @@ struct TCmdSpawnMonster {
 	uint16_t typeIndex;
 	uint16_t monsterId;
 	uint32_t seed;
+	uint8_t golemOwnerPlayerId;
+	uint8_t golemSpellLevel;
 };
 
 struct TCmdQuest {
@@ -751,17 +735,15 @@ void DeltaLoadLevel();
 /** @brief Clears last sent player command for the local player. This is used when a game tick changes. */
 void ClearLastSentPlayerCmd();
 void NetSendCmd(bool bHiPri, _cmd_id bCmd);
-void NetSendCmdGolem(uint8_t mx, uint8_t my, Direction dir, uint8_t menemy, int hp, uint8_t cl);
-void NetSendCmdSpawnMonster(Point position, Direction dir, uint16_t typeIndex, uint16_t monsterId, uint32_t seed);
+void NetSendCmdSpawnMonster(Point position, Direction dir, uint16_t typeIndex, uint16_t monsterId, uint32_t seed, uint8_t golemOwnerPlayerId, uint8_t golemSpellLevel);
 void NetSendCmdLoc(uint8_t playerId, bool bHiPri, _cmd_id bCmd, Point position);
 void NetSendCmdLocParam1(bool bHiPri, _cmd_id bCmd, Point position, uint16_t wParam1);
 void NetSendCmdLocParam2(bool bHiPri, _cmd_id bCmd, Point position, uint16_t wParam1, uint16_t wParam2);
 void NetSendCmdLocParam3(bool bHiPri, _cmd_id bCmd, Point position, uint16_t wParam1, uint16_t wParam2, uint16_t wParam3);
 void NetSendCmdLocParam4(bool bHiPri, _cmd_id bCmd, Point position, uint16_t wParam1, uint16_t wParam2, uint16_t wParam3, uint16_t wParam4);
-void NetSendCmdLocParam5(bool bHiPri, _cmd_id bCmd, Point position, uint16_t wParam1, uint16_t wParam2, uint16_t wParam3, uint16_t wParam4, uint16_t wParam5);
 void NetSendCmdParam1(bool bHiPri, _cmd_id bCmd, uint16_t wParam1);
 void NetSendCmdParam2(bool bHiPri, _cmd_id bCmd, uint16_t wParam1, uint16_t wParam2);
-void NetSendCmdParam5(bool bHiPri, _cmd_id bCmd, uint16_t wParam1, uint16_t wParam2, uint16_t wParam3, uint16_t wParam4, uint16_t wParam5);
+void NetSendCmdParam4(bool bHiPri, _cmd_id bCmd, uint16_t wParam1, uint16_t wParam2, uint16_t wParam3, uint16_t wParam4);
 void NetSendCmdQuest(bool bHiPri, const Quest &quest);
 void NetSendCmdGItem(bool bHiPri, _cmd_id bCmd, const Player &player, uint8_t ii);
 void NetSendCmdPItem(bool bHiPri, _cmd_id bCmd, Point position, const Item &item);
@@ -769,11 +751,12 @@ void NetSyncInvItem(const Player &player, int invListIndex);
 void NetSendCmdChItem(bool bHiPri, uint8_t bLoc, bool forceSpellChange = false);
 void NetSendCmdDelItem(bool bHiPri, uint8_t bLoc);
 void NetSendCmdChInvItem(bool bHiPri, int invGridIndex);
-void NetSendCmdChBeltItem(bool bHiPri, int invGridIndex);
+void NetSendCmdChBeltItem(bool bHiPri, int beltIndex);
 void NetSendCmdDamage(bool bHiPri, const Player &player, uint32_t dwDam, DamageType damageType);
 void NetSendCmdMonDmg(bool bHiPri, uint16_t wMon, uint32_t dwDam);
 void NetSendCmdString(uint32_t pmask, const char *pszStr);
 void delta_close_portal(const Player &player);
-size_t ParseCmd(uint8_t pnum, const TCmd *pCmd);
+bool ValidateCmdSize(size_t requiredCmdSize, size_t maxCmdSize, size_t playerId);
+size_t ParseCmd(uint8_t pnum, const TCmd *pCmd, size_t maxCmdSize);
 
 } // namespace devilution

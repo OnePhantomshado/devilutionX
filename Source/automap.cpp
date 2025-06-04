@@ -14,11 +14,13 @@
 #include "engine/load_file.hpp"
 #include "engine/palette.h"
 #include "engine/render/automap_render.hpp"
+#include "engine/render/primitive_render.hpp"
 #include "levels/gendung.h"
 #include "levels/setmaps.h"
 #include "player.h"
 #include "utils/attributes.h"
 #include "utils/enum_traits.h"
+#include "utils/is_of.hpp"
 #include "utils/language.h"
 #include "utils/ui_fwd.h"
 #include "utils/utf8.hpp"
@@ -1281,31 +1283,34 @@ void SearchAutomapItem(const Surface &out, const Displacement &myPlayerOffset, i
 
 	const int startX = std::clamp(tile.x - searchRadius, 0, MAXDUNX);
 	const int startY = std::clamp(tile.y - searchRadius, 0, MAXDUNY);
-
 	const int endX = std::clamp(tile.x + searchRadius, 0, MAXDUNX);
 	const int endY = std::clamp(tile.y + searchRadius, 0, MAXDUNY);
 
-	int scale = (GetAutomapType() == AutomapType::Minimap) ? MinimapScale : AutoMapScale;
+	const AutomapType mapType = GetAutomapType();
+	const int scale = (mapType == AutomapType::Minimap) ? MinimapScale : AutoMapScale;
 
 	for (int i = startX; i < endX; i++) {
 		for (int j = startY; j < endY; j++) {
 			if (!highlightTile({ i, j }))
 				continue;
 
-			int px = i - 2 * AutomapOffset.deltaX - ViewPosition.x;
-			int py = j - 2 * AutomapOffset.deltaY - ViewPosition.y;
+			const int px = i - 2 * AutomapOffset.deltaX - ViewPosition.x;
+			const int py = j - 2 * AutomapOffset.deltaY - ViewPosition.y;
 
 			Point screen = {
-				(myPlayerOffset.deltaX * scale / 100 / 2) + (px - py) * AmLine(AmLineLength::DoubleTile) + gnScreenWidth / 2,
-				(myPlayerOffset.deltaY * scale / 100 / 2) + (px + py) * AmLine(AmLineLength::FullTile) + (gnScreenHeight - GetMainPanel().size.height) / 2
+				(myPlayerOffset.deltaX * scale / 100 / 2) + (px - py) * AmLine(AmLineLength::DoubleTile),
+				(myPlayerOffset.deltaY * scale / 100 / 2) + (px + py) * AmLine(AmLineLength::FullTile),
 			};
 
-			if (CanPanelsCoverView()) {
+			screen += GetAutomapScreen();
+
+			if (mapType != AutomapType::Minimap && CanPanelsCoverView()) {
 				if (IsRightPanelOpen())
-					screen.x -= 160;
+					screen.x -= gnScreenWidth / 4;
 				if (IsLeftPanelOpen())
-					screen.x += 160;
+					screen.x += gnScreenWidth / 4;
 			}
+
 			screen.y -= AmLine(AmLineLength::FullTile);
 			DrawDiamond(out, screen, MapColorsItem);
 		}
@@ -1780,6 +1785,11 @@ void DrawAutomap(const Surface &out)
 		DrawHorizontalLine(out, MinimapRect.position + Displacement { -2, MinimapRect.size.height }, MinimapRect.size.width + 3, MapColorsDim);
 		DrawVerticalLine(out, MinimapRect.position + Displacement { -2, -1 }, MinimapRect.size.height + 1, MapColorsDim);
 		DrawVerticalLine(out, MinimapRect.position + Displacement { MinimapRect.size.width, -1 }, MinimapRect.size.height + 1, MapColorsDim);
+
+		if (AutoMapShowItems)
+			SearchAutomapItem(out, myPlayerOffset, 8, [](Point position) {
+				return dItem[position.x][position.y] != 0;
+			});
 	}
 
 	Point screen = {};

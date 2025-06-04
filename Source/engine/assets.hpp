@@ -3,6 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
+#include <map>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -12,12 +15,20 @@
 #include <fmt/format.h>
 
 #include "appfat.h"
-#include "diablo.h"
-#include "mpq/mpq_reader.hpp"
+#include "game_mode.hpp"
+#include "headless_mode.hpp"
 #include "utils/file_util.h"
 #include "utils/language.h"
 #include "utils/str_cat.hpp"
 #include "utils/string_or_view.hpp"
+
+#ifndef UNPACKED_MPQS
+#include "mpq/mpq_reader.hpp"
+#endif
+
+#ifdef USE_SDL1
+#include "utils/sdl2_to_1_2_backports.h"
+#endif
 
 namespace devilution {
 
@@ -267,5 +278,35 @@ struct AssetData {
 };
 
 tl::expected<AssetData, std::string> LoadAsset(std::string_view path);
+
+#ifdef UNPACKED_MPQS
+using MpqArchiveT = std::string;
+#else
+using MpqArchiveT = MpqArchive;
+#endif
+
+extern DVL_API_FOR_TEST std::map<int, MpqArchiveT, std::greater<>> MpqArchives;
+constexpr int MainMpqPriority = 1000;
+constexpr int DevilutionXMpqPriority = 9000;
+constexpr int LangMpqPriority = 9100;
+constexpr int FontMpqPriority = 9200;
+extern bool HasHellfireMpq;
+
+void LoadCoreArchives();
+void LoadLanguageArchive();
+void LoadGameArchives();
+void LoadHellfireArchives();
+void UnloadModArchives();
+void LoadModArchives(std::span<const std::string_view> modnames);
+
+#ifdef BUILD_TESTING
+[[nodiscard]] inline bool HaveMainData() { return MpqArchives.find(MainMpqPriority) != MpqArchives.end(); }
+#endif
+[[nodiscard]] inline bool HaveExtraFonts() { return MpqArchives.find(FontMpqPriority) != MpqArchives.end(); }
+[[nodiscard]] inline bool HaveHellfire() { return HasHellfireMpq; }
+[[nodiscard]] inline bool HaveIntro() { return FindAsset("gendata\\diablo1.smk").ok(); }
+[[nodiscard]] inline bool HaveFullMusic() { return FindAsset("music\\dintro.wav").ok() || FindAsset("music\\dintro.mp3").ok(); }
+[[nodiscard]] inline bool HaveBardAssets() { return FindAsset("plrgfx\\bard\\bha\\bhaas.clx").ok(); }
+[[nodiscard]] inline bool HaveBarbarianAssets() { return FindAsset("plrgfx\\barbarian\\cha\\chaas.clx").ok(); }
 
 } // namespace devilution

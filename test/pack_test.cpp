@@ -3,9 +3,12 @@
 #include <gtest/gtest.h>
 
 #include "cursor.h"
+#include "engine/assets.hpp"
+#include "game_mode.hpp"
 #include "monstdat.h"
 #include "pack.h"
 #include "playerdat.hpp"
+#include "utils/is_of.hpp"
 #include "utils/paths.h"
 
 namespace devilution {
@@ -50,6 +53,16 @@ ItemPack SwappedLE(const ItemPack &pack)
 	return swapped;
 }
 
+void SetHellfireState(bool enable)
+{
+	gbIsHellfire = enable;
+	UnloadModArchives();
+	if (enable) {
+		LoadModArchives({ { "Hellfire" } });
+	}
+	LoadItemData();
+}
+
 void ComparePackedItems(const ItemPack &item1LE, const ItemPack &item2LE)
 {
 	// Packs are little-endian.
@@ -92,7 +105,7 @@ void ComparePackedItems(const ItemPack &item1LE, const ItemPack &item2LE)
 	}
 }
 typedef struct TestItemStruct {
-	char _iIName[64];
+	char _iIName[ItemNameLength];
 	ItemType _itype;
 	int _iClass;
 	int _iCurs;
@@ -426,7 +439,7 @@ TEST_F(PackTest, UnPackItem_diablo)
 	Item id;
 	ItemPack is;
 
-	gbIsHellfire = false;
+	SetHellfireState(false);
 	gbIsMultiplayer = false;
 	gbIsSpawn = false;
 
@@ -449,7 +462,7 @@ TEST_F(PackTest, UnPackItem_diablo_unique_bug)
 	const auto pkItemBug = SwappedLE(ItemPack { 6, 15 | CF_UPER1 | CF_UPER15 | CF_UNIQUE, 14, 5, 60, 60, 0, 0, 0, 0 }); // Veil of Steel - with morph bug
 	const auto pkItem = SwappedLE(ItemPack { 6, 15 | CF_UPER15 | CF_UNIQUE, 14, 5, 60, 60, 0, 0, 0, 0 });               // Veil of Steel - fixed
 
-	gbIsHellfire = false;
+	SetHellfireState(false);
 	gbIsMultiplayer = false;
 	gbIsSpawn = false;
 
@@ -499,7 +512,7 @@ TEST_F(PackTest, UnPackItem_spawn)
 	Item id;
 	ItemPack is;
 
-	gbIsHellfire = false;
+	SetHellfireState(false);
 	gbIsMultiplayer = false;
 	gbIsSpawn = true;
 
@@ -544,7 +557,7 @@ TEST_F(PackTest, UnPackItem_diablo_multiplayer)
 	Item id;
 	ItemPack is;
 
-	gbIsHellfire = false;
+	SetHellfireState(false);
 	gbIsMultiplayer = true;
 	gbIsSpawn = false;
 
@@ -764,7 +777,7 @@ TEST_F(PackTest, UnPackItem_hellfire)
 	Item id;
 	ItemPack is;
 
-	gbIsHellfire = true;
+	SetHellfireState(true);
 	gbIsMultiplayer = false;
 	gbIsSpawn = false;
 
@@ -788,7 +801,7 @@ TEST_F(PackTest, UnPackItem_diablo_strip_hellfire_items)
 	const auto is = SwappedLE(ItemPack { 1478792102, 3 | CF_UPER1, 92, 0, 0, 0, 0, 0, 0, 0 }); // Scroll of Search
 	Item id;
 
-	gbIsHellfire = false;
+	SetHellfireState(false);
 	gbIsMultiplayer = false;
 	gbIsSpawn = false;
 
@@ -963,9 +976,9 @@ public:
 
 		// The tests need spawn.mpq or diabdat.mpq
 		// Please provide them so that the tests can run successfully
-		ASSERT_TRUE(HaveSpawn() || HaveDiabdat());
+		ASSERT_TRUE(HaveMainData());
 
-		gbIsHellfire = false;
+		SetHellfireState(false);
 		InitCursor();
 		LoadSpellData();
 		LoadPlayerDataFiles();

@@ -14,7 +14,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "FreeBSD|OpenBSD|DragonFly|NetBSD")
 endif()
 
 set(TARGET_PLATFORM host CACHE STRING "Target platform")
-set_property(CACHE TARGET_PLATFORM PROPERTY STRINGS host retrofw rg99 rg350 gkd350h cpigamesh miyoo_mini windows9x)
+set_property(CACHE TARGET_PLATFORM PROPERTY STRINGS host retrofw rg99 rg350 gkd350h cpigamesh miyoo_mini windows9x windowsXP)
 if(TARGET_PLATFORM STREQUAL "retrofw")
   include(platforms/retrofw)
 elseif(TARGET_PLATFORM STREQUAL "rg99")
@@ -29,8 +29,10 @@ elseif(TARGET_PLATFORM STREQUAL "lepus")
   include(platforms/lepus)
 elseif(TARGET_PLATFORM STREQUAL "miyoo_mini")
   include(platforms/miyoo_mini)
-elseif(TARGET_PLATORM STREQUAL "windows9x")
+elseif(TARGET_PLATFORM STREQUAL "windows9x")
   include(platforms/windows9x)
+elseif(TARGET_PLATFORM STREQUAL "windowsXP")
+  include(platforms/windowsXP)
 elseif(WIN32)
   include(platforms/windows)
 endif()
@@ -88,4 +90,16 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
   # to detect available APIs.
   string(REGEX REPLACE "^([0-9]+)\\.([0-9]+).*$" "\\1" DARWIN_MAJOR_VERSION "${CMAKE_SYSTEM_VERSION}")
   string(REGEX REPLACE "^([0-9]+)\\.([0-9]+).*$" "\\2" DARWIN_MINOR_VERSION "${CMAKE_SYSTEM_VERSION}")
+
+  if(DARWIN_MAJOR_VERSION VERSION_EQUAL 8)
+    include(platforms/macos_tiger)
+  endif()
+
+  # For older macOS, we assume MacPorts because Homebrew only supports newer version
+  if(DARWIN_MAJOR_VERSION VERSION_LESS 11)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/platforms/macports/finders")
+
+    # On MacPorts, libfmt is in a subdirectory:
+    list(APPEND CMAKE_MODULE_PATH "/opt/local/lib/libfmt11/cmake")
+  endif()
 endif()

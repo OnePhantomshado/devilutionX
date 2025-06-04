@@ -3,7 +3,9 @@
 #include "DiabloUI/diabloui.h"
 #include "DiabloUI/selok.h"
 #include "control.h"
+#include "engine/assets.hpp"
 #include "engine/load_clx.hpp"
+#include "game_mode.hpp"
 #include "utils/language.h"
 
 namespace devilution {
@@ -45,8 +47,7 @@ void MainmenuLoad(const char *name)
 #endif
 
 	if (!gbIsSpawn || gbIsHellfire) {
-		if (gbIsHellfire)
-			ArtBackgroundWidescreen = LoadOptionalClx("ui_art\\mainmenuw.clx");
+		ArtBackgroundWidescreen = LoadOptionalClx("ui_art\\mainmenuw.clx");
 		LoadBackgroundArt("ui_art\\mainmenu");
 	} else {
 		LoadBackgroundArt("ui_art\\swmmenu");
@@ -103,7 +104,7 @@ bool UiMainMenuDialog(const char *name, _mainmenu_selections *pdwResult, int att
 		while (MainMenuResult == MAINMENU_NONE) {
 			UiClearScreen();
 			UiPollAndRender();
-			if (SDL_GetTicks() >= dwAttractTicks && (HaveDiabdat() || HaveHellfire())) {
+			if (SDL_GetTicks() >= dwAttractTicks && (HaveIntro() || gbIsHellfire)) {
 				MainMenuResult = MAINMENU_ATTRACT_MODE;
 			}
 		}

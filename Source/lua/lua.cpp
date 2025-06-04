@@ -11,8 +11,14 @@
 #include "appfat.h"
 #include "engine/assets.hpp"
 #include "lua/modules/audio.hpp"
+#include "lua/modules/hellfire.hpp"
+#include "lua/modules/i18n.hpp"
+#include "lua/modules/items.hpp"
 #include "lua/modules/log.hpp"
+#include "lua/modules/player.hpp"
 #include "lua/modules/render.hpp"
+#include "lua/modules/towners.hpp"
+#include "options.h"
 #include "plrmsg.h"
 #include "utils/console.h"
 #include "utils/log.hpp"
@@ -36,6 +42,8 @@ struct LuaState {
 };
 
 std::optional<LuaState> CurrentLuaState;
+
+std::vector<tl::function_ref<void()>> IsModChangeHandlers;
 
 // A Lua function that we use to generate a `require` implementation.
 constexpr std::string_view RequireGenSrc = R"lua(
@@ -193,6 +201,43 @@ sol::environment CreateLuaSandbox()
 	return sandbox;
 }
 
+void AddModsChangedHandler(tl::function_ref<void()> callback)
+{
+	IsModChangeHandlers.push_back(callback);
+}
+
+void LuaReloadActiveMods()
+{
+	// Loaded without a sandbox.
+	CurrentLuaState->events = RunScript(/*env=*/std::nullopt, "devilutionx.events", /*optional=*/false);
+	CurrentLuaState->commonPackages["devilutionx.events"] = CurrentLuaState->events;
+
+	gbIsHellfire = false;
+	UnloadModArchives();
+
+	std::vector<std::string_view> modnames = GetOptions().Mods.GetActiveModList();
+	LoadModArchives(modnames);
+
+	for (std::string_view modname : modnames) {
+		std::string packageName = StrCat("mods.", modname, ".init");
+		RunScript(CreateLuaSandbox(), packageName, /*optional=*/true);
+	}
+
+	for (tl::function_ref<void()> handler : IsModChangeHandlers) {
+		handler();
+	}
+
+	// Reload game data (this can probably be done later in the process to avoid having to reload it)
+	LoadPlayerDataFiles();
+	LoadSpellData();
+	LoadMissileData();
+	LoadMonsterData();
+	LoadItemData();
+	LoadObjectData();
+
+	LuaEvent("LoadModsComplete");
+}
+
 void LuaInitialize()
 {
 	CurrentLuaState.emplace(LuaState { .sol = { sol::c_call<decltype(&LuaPanic), &LuaPanic> } });
@@ -212,28 +257,31 @@ void LuaInitialize()
 	// Registering devilutionx object table
 	SafeCallResult(lua.safe_script(RequireGenSrc), /*optional=*/false);
 
-	// Loaded without a sandbox.
-	CurrentLuaState->events = RunScript(/*env=*/std::nullopt, "devilutionx.events", /*optional=*/false);
-
 	CurrentLuaState->commonPackages = lua.create_table_with(
 #ifdef _DEBUG
 	    "devilutionx.dev", LuaDevModule(lua),
 #endif
 	    "devilutionx.version", PROJECT_VERSION,
+	    "devilutionx.i18n", LuaI18nModule(lua),
+	    "devilutionx.items", LuaItemModule(lua),
 	    "devilutionx.log", LuaLogModule(lua),
 	    "devilutionx.audio", LuaAudioModule(lua),
+	    "devilutionx.player", LuaPlayerModule(lua),
 	    "devilutionx.render", LuaRenderModule(lua),
+	    "devilutionx.towners", LuaTownersModule(lua),
+	    "devilutionx.hellfire", LuaHellfireModule(lua),
 	    "devilutionx.message", [](std::string_view text) { EventPlrMsg(text, UiFlags::ColorRed); },
-	    // These packages are loaded without a sandbox:
-	    "devilutionx.events", CurrentLuaState->events,
+	    // This package is loaded without a sandbox:
 	    "inspect", RunScript(/*env=*/std::nullopt, "inspect", /*optional=*/false));
 
 	// Used by the custom require implementation.
 	lua["setEnvironment"] = [](const sol::environment &env, const sol::function &fn) { sol::set_environment(env, fn); };
 
-	RunScript(CreateLuaSandbox(), "user", /*optional=*/true);
+	for (OptionEntryBase *mod : GetOptions().Mods.GetEntries()) {
+		mod->SetValueChangedCallback(LuaReloadActiveMods);
+	}
 
-	LuaEvent("GameBoot");
+	LuaReloadActiveMods();
 }
 
 void LuaShutdown()

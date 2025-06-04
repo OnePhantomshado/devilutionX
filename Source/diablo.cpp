@@ -12,6 +12,7 @@
 #include <config.h>
 
 #include "DiabloUI/selstart.h"
+#include "appfat.h"
 #include "automap.h"
 #include "capture.h"
 #include "control.h"
@@ -21,6 +22,8 @@
 #include "debug.h"
 #endif
 #include "DiabloUI/diabloui.h"
+#include "controls/control_mode.hpp"
+#include "controls/keymapper.hpp"
 #include "controls/plrctrls.h"
 #include "controls/remap_keyboard.h"
 #include "diablo.h"
@@ -38,11 +41,13 @@
 #include "engine/random.hpp"
 #include "engine/render/clx_render.hpp"
 #include "engine/sound.h"
+#include "game_mode.hpp"
 #include "gamemenu.h"
 #include "gmenu.h"
+#include "headless_mode.hpp"
 #include "help.h"
 #include "hwcursor.hpp"
-#include "init.h"
+#include "init.hpp"
 #include "inv.h"
 #include "levels/drlg_l1.h"
 #include "levels/drlg_l2.h"
@@ -78,6 +83,7 @@
 #include "qol/monhealthbar.h"
 #include "qol/stash.h"
 #include "qol/xpbar.h"
+#include "quick_messages.hpp"
 #include "restrict.h"
 #include "stores.h"
 #include "storm/storm_net.hpp"
@@ -86,6 +92,7 @@
 #include "track.h"
 #include "utils/console.h"
 #include "utils/display.h"
+#include "utils/is_of.hpp"
 #include "utils/language.h"
 #include "utils/parse_int.hpp"
 #include "utils/paths.h"
@@ -121,9 +128,6 @@ bool gbProcessPlayers;
 bool gbLoadGame;
 bool cineflag;
 int PauseMode;
-bool gbBard;
-bool gbBarbarian;
-bool HeadlessMode = false;
 clicktype sgbMouseDown;
 uint16_t gnTickDelay = 50;
 char gszProductName[64] = "DevilutionX vUnknown";
@@ -133,18 +137,6 @@ bool DebugDisableNetworkTimeout = false;
 std::vector<std::string> DebugCmdsFromCommandLine;
 #endif
 GameLogicStep gGameLogicStep = GameLogicStep::None;
-QuickMessage QuickMessages[QUICK_MESSAGE_OPTIONS] = {
-	{ "QuickMessage1", N_("I need help! Come here!") },
-	{ "QuickMessage2", N_("Follow me.") },
-	{ "QuickMessage3", N_("Here's something for you.") },
-	{ "QuickMessage4", N_("Now you DIE!") },
-	{ "QuickMessage5", N_("Heal yourself!") },
-	{ "QuickMessage6", N_("Watch out!") },
-	{ "QuickMessage7", N_("Thanks.") },
-	{ "QuickMessage8", N_("Retreat!") },
-	{ "QuickMessage9", N_("Sorry.") },
-	{ "QuickMessage10", N_("I'm waiting.") },
-};
 
 /** This and the following mouse variables are for handling in-game click-and-hold actions */
 MouseActionType LastMouseButtonAction = MouseActionType::None;
@@ -355,7 +347,7 @@ void LeftMouseDown(uint16_t modState)
 		return;
 	}
 
-	if (ActiveStore != TalkID::None) {
+	if (IsPlayerInStore()) {
 		CheckStoreBtn();
 		return;
 	}
@@ -419,7 +411,7 @@ void LeftMouseUp(uint16_t modState)
 	}
 	if (LevelButtonDown)
 		CheckLevelButtonUp();
-	if (ActiveStore != TalkID::None)
+	if (IsPlayerInStore())
 		ReleaseStoreBtn();
 }
 
@@ -441,7 +433,7 @@ void RightMouseDown(bool isShiftHeld)
 		doom_close();
 		return;
 	}
-	if (ActiveStore != TalkID::None)
+	if (IsPlayerInStore())
 		return;
 	if (SpellSelectFlag) {
 		SetSpell();
@@ -467,7 +459,7 @@ void ReleaseKey(SDL_Keycode vkey)
 	remap_keyboard_key(&vkey);
 	if (sgnTimeoutCurs != CURSOR_NONE)
 		return;
-	sgOptions.Keymapper.KeyReleased(vkey);
+	KeymapperRelease(vkey);
 }
 
 void ClosePanels()
@@ -487,6 +479,7 @@ void ClosePanels()
 
 void PressKey(SDL_Keycode vkey, uint16_t modState)
 {
+	Options &options = GetOptions();
 	remap_keyboard_key(&vkey);
 
 	if (vkey == SDLK_UNKNOWN)
@@ -497,14 +490,25 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 	}
 
 	if (MyPlayerIsDead) {
+		if (vkey == SDLK_ESCAPE) {
+			if (!gbIsMultiplayer) {
+				if (gbValidSaveFile)
+					gamemenu_load_game(false);
+				else
+					gamemenu_exit_game(false);
+			} else {
+				NetSendCmd(true, CMD_RETOWN);
+			}
+			return;
+		}
 		if (sgnTimeoutCurs != CURSOR_NONE) {
 			return;
 		}
-		sgOptions.Keymapper.KeyPressed(vkey);
+		KeymapperPress(vkey);
 		if (vkey == SDLK_RETURN || vkey == SDLK_KP_ENTER) {
 			if ((modState & KMOD_ALT) != 0) {
-				sgOptions.Graphics.fullscreen.SetValue(!IsFullScreen());
-				SaveOptions();
+				options.Graphics.fullscreen.SetValue(!IsFullScreen());
+				if (!demo::IsRunning()) SaveOptions();
 			} else {
 				TypeChatMessage();
 			}
@@ -513,7 +517,8 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 			return;
 		}
 	}
-	if (vkey == SDLK_ESCAPE) {
+	// Disallow player from accessing escape menu during the frames before the death message appears
+	if (vkey == SDLK_ESCAPE && MyPlayer->_pHitPoints > 0) {
 		if (!PressEscKey()) {
 			LastMouseButtonAction = MouseActionType::None;
 			gamemenu_on();
@@ -534,12 +539,12 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 		return;
 	}
 
-	sgOptions.Keymapper.KeyPressed(vkey);
+	KeymapperPress(vkey);
 
 	if (PauseMode == 2) {
 		if ((vkey == SDLK_RETURN || vkey == SDLK_KP_ENTER) && (modState & KMOD_ALT) != 0) {
-			sgOptions.Graphics.fullscreen.SetValue(!IsFullScreen());
-			SaveOptions();
+			options.Graphics.fullscreen.SetValue(!IsFullScreen());
+			if (!demo::IsRunning()) SaveOptions();
 		}
 		return;
 	}
@@ -576,9 +581,9 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 	case SDLK_RETURN:
 	case SDLK_KP_ENTER:
 		if ((modState & KMOD_ALT) != 0) {
-			sgOptions.Graphics.fullscreen.SetValue(!IsFullScreen());
-			SaveOptions();
-		} else if (ActiveStore != TalkID::None) {
+			options.Graphics.fullscreen.SetValue(!IsFullScreen());
+			if (!demo::IsRunning()) SaveOptions();
+		} else if (IsPlayerInStore()) {
 			StoreEnter();
 		} else if (QuestLogIsOpen) {
 			QuestlogEnter();
@@ -587,7 +592,7 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 		}
 		return;
 	case SDLK_UP:
-		if (ActiveStore != TalkID::None) {
+		if (IsPlayerInStore()) {
 			StoreUp();
 		} else if (QuestLogIsOpen) {
 			QuestlogUp();
@@ -602,7 +607,7 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 		}
 		return;
 	case SDLK_DOWN:
-		if (ActiveStore != TalkID::None) {
+		if (IsPlayerInStore()) {
 			StoreDown();
 		} else if (QuestLogIsOpen) {
 			QuestlogDown();
@@ -617,14 +622,14 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 		}
 		return;
 	case SDLK_PAGEUP:
-		if (ActiveStore != TalkID::None) {
+		if (IsPlayerInStore()) {
 			StorePrior();
 		} else if (ChatLogFlag) {
 			ChatLogScrollTop();
 		}
 		return;
 	case SDLK_PAGEDOWN:
-		if (ActiveStore != TalkID::None) {
+		if (IsPlayerInStore()) {
 			StoreNext();
 		} else if (ChatLogFlag) {
 			ChatLogScrollBottom();
@@ -645,7 +650,7 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 
 void HandleMouseButtonDown(Uint8 button, uint16_t modState)
 {
-	if (ActiveStore != TalkID::None && (button == SDL_BUTTON_X1
+	if (IsPlayerInStore() && (button == SDL_BUTTON_X1
 #if !SDL_VERSION_ATLEAST(2, 0, 0)
 	        || button == 8
 #endif
@@ -654,20 +659,22 @@ void HandleMouseButtonDown(Uint8 button, uint16_t modState)
 		return;
 	}
 
-	if (sgbMouseDown == CLICK_NONE) {
-		switch (button) {
-		case SDL_BUTTON_LEFT:
+	switch (button) {
+	case SDL_BUTTON_LEFT:
+		if (sgbMouseDown == CLICK_NONE) {
 			sgbMouseDown = CLICK_LEFT;
 			LeftMouseDown(modState);
-			break;
-		case SDL_BUTTON_RIGHT:
+		}
+		break;
+	case SDL_BUTTON_RIGHT:
+		if (sgbMouseDown == CLICK_NONE) {
 			sgbMouseDown = CLICK_RIGHT;
 			RightMouseDown((modState & KMOD_SHIFT) != 0);
-			break;
-		default:
-			sgOptions.Keymapper.KeyPressed(button | KeymapperMouseButtonMask);
-			break;
 		}
+		break;
+	default:
+		KeymapperPress(static_cast<SDL_Keycode>(button | KeymapperMouseButtonMask));
+		break;
 	}
 }
 
@@ -681,7 +688,7 @@ void HandleMouseButtonUp(Uint8 button, uint16_t modState)
 		LastMouseButtonAction = MouseActionType::None;
 		sgbMouseDown = CLICK_NONE;
 	} else {
-		sgOptions.Keymapper.KeyReleased(static_cast<SDL_Keycode>(button | KeymapperMouseButtonMask));
+		KeymapperRelease(static_cast<SDL_Keycode>(button | KeymapperMouseButtonMask));
 	}
 }
 
@@ -692,6 +699,7 @@ void HandleMouseButtonUp(Uint8 button, uint16_t modState)
 
 void GameEventHandler(const SDL_Event &event, uint16_t modState)
 {
+	[[maybe_unused]] Options &options = GetOptions();
 	StaticVector<ControllerButtonEvent, 4> ctrlEvents = ToControllerButtonEvents(event);
 	for (ControllerButtonEvent ctrlEvent : ctrlEvents) {
 		GameAction action;
@@ -754,7 +762,7 @@ void GameEventHandler(const SDL_Event &event, uint16_t modState)
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 	case SDL_MOUSEWHEEL:
 		if (event.wheel.y > 0) { // Up
-			if (ActiveStore != TalkID::None) {
+			if (IsPlayerInStore()) {
 				StoreUp();
 			} else if (QuestLogIsOpen) {
 				QuestlogUp();
@@ -764,11 +772,15 @@ void GameEventHandler(const SDL_Event &event, uint16_t modState)
 				ChatLogScrollUp();
 			} else if (IsStashOpen) {
 				Stash.PreviousPage();
+			} else if (SDL_GetModState() & KMOD_CTRL) {
+				if (AutomapActive) {
+					AutomapZoomIn();
+				}
 			} else {
-				sgOptions.Keymapper.KeyPressed(MouseScrollUpButton);
+				KeymapperPress(MouseScrollUpButton);
 			}
 		} else if (event.wheel.y < 0) { // down
-			if (ActiveStore != TalkID::None) {
+			if (IsPlayerInStore()) {
 				StoreDown();
 			} else if (QuestLogIsOpen) {
 				QuestlogDown();
@@ -778,13 +790,17 @@ void GameEventHandler(const SDL_Event &event, uint16_t modState)
 				ChatLogScrollDown();
 			} else if (IsStashOpen) {
 				Stash.NextPage();
+			} else if (SDL_GetModState() & KMOD_CTRL) {
+				if (AutomapActive) {
+					AutomapZoomOut();
+				}
 			} else {
-				sgOptions.Keymapper.KeyPressed(MouseScrollDownButton);
+				KeymapperPress(MouseScrollDownButton);
 			}
 		} else if (event.wheel.x > 0) { // left
-			sgOptions.Keymapper.KeyPressed(MouseScrollLeftButton);
+			KeymapperPress(MouseScrollLeftButton);
 		} else if (event.wheel.x < 0) { // right
-			sgOptions.Keymapper.KeyPressed(MouseScrollRightButton);
+			KeymapperPress(MouseScrollRightButton);
 		}
 		break;
 #endif
@@ -795,7 +811,7 @@ void GameEventHandler(const SDL_Event &event, uint16_t modState)
 			nthread_ignore_mutex(true);
 			PaletteFadeOut(8);
 			sound_stop();
-			ShowProgress(GetCustomEvent(event.type));
+			ShowProgress(GetCustomEvent(event));
 
 			RedrawEverything();
 			if (!HeadlessMode) {
@@ -1160,7 +1176,7 @@ void CheckArchivesUpToDate()
 
 void ApplicationInit()
 {
-	if (*sgOptions.Graphics.showFPS)
+	if (*GetOptions().Graphics.showFPS)
 		EnableFrameCount();
 
 	init_create_window();
@@ -1176,17 +1192,25 @@ void ApplicationInit()
 
 void DiabloInit()
 {
-	if (forceSpawn || *sgOptions.GameMode.shareware)
+	if (forceSpawn || *GetOptions().GameMode.shareware)
 		gbIsSpawn = true;
-	if (forceDiablo || *sgOptions.GameMode.gameMode == StartUpGameMode::Diablo)
-		gbIsHellfire = false;
-	if (forceHellfire)
-		gbIsHellfire = true;
+
+	bool wasHellfireDiscovered = false;
+	if (!forceDiablo && !forceHellfire)
+		wasHellfireDiscovered = (HaveHellfire() && *GetOptions().GameMode.gameMode == StartUpGameMode::Ask);
+	bool enableHellfire = forceHellfire || wasHellfireDiscovered;
+	if (!forceDiablo && *GetOptions().GameMode.gameMode == StartUpGameMode::Hellfire) { // Migrate legacy options
+		GetOptions().GameMode.gameMode.SetValue(StartUpGameMode::Diablo);
+		enableHellfire = true;
+	}
+	if (forceDiablo || enableHellfire) {
+		GetOptions().Mods.SetHellfireEnabled(enableHellfire);
+	}
 
 	gbIsHellfireSaveGame = gbIsHellfire;
 
-	for (size_t i = 0; i < QUICK_MESSAGE_OPTIONS; i++) {
-		auto &messages = sgOptions.Chat.szHotKeyMsgs[i];
+	for (size_t i = 0; i < QuickMessages.size(); i++) {
+		auto &messages = GetOptions().Chat.szHotKeyMsgs[i];
 		if (messages.empty()) {
 			messages.emplace_back(_(QuickMessages[i].message));
 		}
@@ -1199,7 +1223,7 @@ void DiabloInit()
 	UiInitialize();
 	was_ui_init = true;
 
-	if (gbIsHellfire && !forceHellfire && *sgOptions.GameMode.gameMode == StartUpGameMode::Ask) {
+	if (wasHellfireDiscovered) {
 		UiSelStartUpGameOption();
 		if (!gbIsHellfire) {
 			// Reinitialize the UI Elements because we changed the game
@@ -1230,10 +1254,10 @@ void DiabloSplash()
 	if (!gbShowIntro)
 		return;
 
-	if (*sgOptions.StartUp.splash == StartUpSplash::LogoAndTitleDialog)
+	if (*GetOptions().StartUp.splash == StartUpSplash::LogoAndTitleDialog)
 		play_movie("gendata\\logo.smk", true);
 
-	auto &intro = gbIsHellfire ? sgOptions.StartUp.hellfireIntro : sgOptions.StartUp.diabloIntro;
+	auto &intro = gbIsHellfire ? GetOptions().StartUp.hellfireIntro : GetOptions().StartUp.diabloIntro;
 
 	if (*intro != StartUpIntro::Off) {
 		if (gbIsHellfire)
@@ -1242,11 +1266,11 @@ void DiabloSplash()
 			play_movie("gendata\\diablo1.smk", true);
 		if (*intro == StartUpIntro::Once) {
 			intro.SetValue(StartUpIntro::Off);
-			SaveOptions();
+			if (!demo::IsRunning()) SaveOptions();
 		}
 	}
 
-	if (IsAnyOf(*sgOptions.StartUp.splash, StartUpSplash::TitleDialog, StartUpSplash::LogoAndTitleDialog))
+	if (IsAnyOf(*GetOptions().StartUp.splash, StartUpSplash::TitleDialog, StartUpSplash::LogoAndTitleDialog))
 		UiTitleDialog();
 }
 
@@ -1506,7 +1530,7 @@ void HelpKeyPressed()
 {
 	if (HelpFlag) {
 		HelpFlag = false;
-	} else if (ActiveStore != TalkID::None) {
+	} else if (IsPlayerInStore()) {
 		InfoString = StringOrView {};
 		AddInfoBoxString(_("No help available")); /// BUGFIX: message isn't displayed
 		AddInfoBoxString(_("while in stores"));
@@ -1530,7 +1554,7 @@ void HelpKeyPressed()
 
 void InventoryKeyPressed()
 {
-	if (ActiveStore != TalkID::None)
+	if (IsPlayerInStore())
 		return;
 	invflag = !invflag;
 	if (!IsLeftPanelOpen() && CanPanelsCoverView()) {
@@ -1551,7 +1575,7 @@ void InventoryKeyPressed()
 
 void CharacterSheetKeyPressed()
 {
-	if (ActiveStore != TalkID::None)
+	if (IsPlayerInStore())
 		return;
 	if (!IsRightPanelOpen() && CanPanelsCoverView()) {
 		if (CharFlag) { // We are closing the character sheet
@@ -1569,7 +1593,7 @@ void CharacterSheetKeyPressed()
 
 void QuestLogKeyPressed()
 {
-	if (ActiveStore != TalkID::None)
+	if (IsPlayerInStore())
 		return;
 	if (!QuestLogIsOpen) {
 		StartQuestlog();
@@ -1594,7 +1618,7 @@ void QuestLogKeyPressed()
 
 void DisplaySpellsKeyPressed()
 {
-	if (ActiveStore != TalkID::None)
+	if (IsPlayerInStore())
 		return;
 	CloseCharPanel();
 	QuestLogIsOpen = false;
@@ -1610,7 +1634,7 @@ void DisplaySpellsKeyPressed()
 
 void SpellBookKeyPressed()
 {
-	if (ActiveStore != TalkID::None)
+	if (IsPlayerInStore())
 		return;
 	SpellbookFlag = !SpellbookFlag;
 	if (!IsLeftPanelOpen() && CanPanelsCoverView()) {
@@ -1684,8 +1708,9 @@ bool CanAutomapBeToggledOff()
 
 void InitKeymapActions()
 {
+	Options &options = GetOptions();
 	for (uint32_t i = 0; i < 8; ++i) {
-		sgOptions.Keymapper.AddAction(
+		options.Keymapper.AddAction(
 		    "BeltItem{}",
 		    N_("Belt item {}"),
 		    N_("Use Belt item."),
@@ -1701,7 +1726,7 @@ void InitKeymapActions()
 		    i + 1);
 	}
 	for (uint32_t i = 0; i < NumHotkeys; ++i) {
-		sgOptions.Keymapper.AddAction(
+		options.Keymapper.AddAction(
 		    "QuickSpell{}",
 		    N_("Quick spell {}"),
 		    N_("Hotkey for skill or spell."),
@@ -1711,7 +1736,7 @@ void InitKeymapActions()
 				    SetSpeedSpell(i);
 				    return;
 			    }
-			    if (!*sgOptions.Gameplay.quickCast)
+			    if (!*GetOptions().Gameplay.quickCast)
 				    ToggleSpell(i);
 			    else
 				    QuickCast(i);
@@ -1720,7 +1745,7 @@ void InitKeymapActions()
 		    CanPlayerTakeAction,
 		    i + 1);
 	}
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "QuickSpellPrevious",
 	    N_("Previous quick spell"),
 	    N_("Selects the previous quick spell (cycles)."),
@@ -1728,7 +1753,7 @@ void InitKeymapActions()
 	    [] { CycleSpellHotkeys(false); },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "QuickSpellNext",
 	    N_("Next quick spell"),
 	    N_("Selects the next quick spell (cycles)."),
@@ -1736,7 +1761,7 @@ void InitKeymapActions()
 	    [] { CycleSpellHotkeys(true); },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "UseHealthPotion",
 	    N_("Use health potion"),
 	    N_("Use health potions from belt."),
@@ -1744,7 +1769,7 @@ void InitKeymapActions()
 	    [] { UseBeltItem(BeltItemType::Healing); },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "UseManaPotion",
 	    N_("Use mana potion"),
 	    N_("Use mana potions from belt."),
@@ -1752,7 +1777,7 @@ void InitKeymapActions()
 	    [] { UseBeltItem(BeltItemType::Mana); },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "DisplaySpells",
 	    N_("Speedbook"),
 	    N_("Open Speedbook."),
@@ -1760,7 +1785,7 @@ void InitKeymapActions()
 	    DisplaySpellsKeyPressed,
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "QuickSave",
 	    N_("Quick save"),
 	    N_("Saves the game."),
@@ -1768,23 +1793,23 @@ void InitKeymapActions()
 	    [] { gamemenu_save_game(false); },
 	    nullptr,
 	    [&]() { return !gbIsMultiplayer && CanPlayerTakeAction(); });
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "QuickLoad",
 	    N_("Quick load"),
 	    N_("Loads the game."),
 	    SDLK_F3,
 	    [] { gamemenu_load_game(false); },
 	    nullptr,
-	    [&]() { return !gbIsMultiplayer && gbValidSaveFile && ActiveStore == TalkID::None && IsGameRunning(); });
+	    [&]() { return !gbIsMultiplayer && gbValidSaveFile && !IsPlayerInStore() && IsGameRunning(); });
 #ifndef NOEXIT
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "QuitGame",
 	    N_("Quit game"),
 	    N_("Closes the game."),
 	    SDLK_UNKNOWN,
 	    [] { gamemenu_quit_game(false); });
 #endif
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "StopHero",
 	    N_("Stop hero"),
 	    N_("Stops walking and cancel pending actions."),
@@ -1792,21 +1817,21 @@ void InitKeymapActions()
 	    [] { MyPlayer->Stop(); },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "Item Highlighting",
 	    N_("Item highlighting"),
 	    N_("Show/hide items on ground."),
 	    SDLK_LALT,
 	    [] { HighlightKeyPressed(true); },
 	    [] { HighlightKeyPressed(false); });
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "Toggle Item Highlighting",
 	    N_("Toggle item highlighting"),
 	    N_("Permanent show/hide items on ground."),
 	    SDLK_RCTRL,
 	    nullptr,
 	    [] { ToggleItemLabelHighlight(); });
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "Toggle Automap",
 	    N_("Toggle automap"),
 	    N_("Toggles if automap is displayed."),
@@ -1814,7 +1839,7 @@ void InitKeymapActions()
 	    DoAutoMap,
 	    nullptr,
 	    IsGameRunning);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "CycleAutomapType",
 	    N_("Cycle map type"),
 	    N_("Opaque -> Transparent -> Minimap -> None"),
@@ -1823,7 +1848,7 @@ void InitKeymapActions()
 	    nullptr,
 	    IsGameRunning);
 
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "Inventory",
 	    N_("Inventory"),
 	    N_("Open Inventory screen."),
@@ -1831,7 +1856,7 @@ void InitKeymapActions()
 	    InventoryKeyPressed,
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "Character",
 	    N_("Character"),
 	    N_("Open Character screen."),
@@ -1839,7 +1864,7 @@ void InitKeymapActions()
 	    CharacterSheetKeyPressed,
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "QuestLog",
 	    N_("Quest log"),
 	    N_("Open Quest log."),
@@ -1847,7 +1872,7 @@ void InitKeymapActions()
 	    QuestLogKeyPressed,
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "SpellBook",
 	    N_("Spellbook"),
 	    N_("Open Spellbook."),
@@ -1855,8 +1880,8 @@ void InitKeymapActions()
 	    SpellBookKeyPressed,
 	    nullptr,
 	    CanPlayerTakeAction);
-	for (uint32_t i = 0; i < QUICK_MESSAGE_OPTIONS; ++i) {
-		sgOptions.Keymapper.AddAction(
+	for (uint32_t i = 0; i < QuickMessages.size(); ++i) {
+		options.Keymapper.AddAction(
 		    "QuickMessage{}",
 		    N_("Quick Message {}"),
 		    N_("Use Quick Message in chat."),
@@ -1866,7 +1891,7 @@ void InitKeymapActions()
 		    nullptr,
 		    i + 1);
 	}
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "Hide Info Screens",
 	    N_("Hide Info Screens"),
 	    N_("Hide all info screens."),
@@ -1890,46 +1915,46 @@ void InitKeymapActions()
 	    },
 	    nullptr,
 	    IsGameRunning);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "Zoom",
 	    N_("Zoom"),
 	    N_("Zoom Game Screen."),
 	    'Z',
 	    [] {
-		    sgOptions.Graphics.zoom.SetValue(!*sgOptions.Graphics.zoom);
+		    GetOptions().Graphics.zoom.SetValue(!*GetOptions().Graphics.zoom);
 		    CalcViewportGeometry();
 	    },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "Pause Game",
 	    N_("Pause Game"),
 	    N_("Pauses the game."),
 	    'P',
 	    diablo_pause_game);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "Pause Game (Alternate)",
 	    N_("Pause Game (Alternate)"),
 	    N_("Pauses the game."),
 	    SDLK_PAUSE,
 	    diablo_pause_game);
-	sgOptions.Keymapper.AddAction(
-	    "DecreaseGamma",
-	    N_("Decrease Gamma"),
+	options.Keymapper.AddAction(
+	    "DecreaseBrightness",
+	    N_("Decrease Brightness"),
 	    N_("Reduce screen brightness."),
-	    'G',
-	    DecreaseGamma,
-	    nullptr,
-	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
-	    "IncreaseGamma",
-	    N_("Increase Gamma"),
-	    N_("Increase screen brightness."),
 	    'F',
-	    IncreaseGamma,
+	    DecreaseBrightness,
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
+	    "IncreaseBrightness",
+	    N_("Increase Brightness"),
+	    N_("Increase screen brightness."),
+	    'G',
+	    IncreaseBrightness,
+	    nullptr,
+	    CanPlayerTakeAction);
+	options.Keymapper.AddAction(
 	    "Help",
 	    N_("Help"),
 	    N_("Open Help Screen."),
@@ -1937,14 +1962,14 @@ void InitKeymapActions()
 	    HelpKeyPressed,
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "Screenshot",
 	    N_("Screenshot"),
 	    N_("Takes a screenshot."),
 	    SDLK_PRINTSCREEN,
 	    nullptr,
 	    CaptureScreen);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "GameInfo",
 	    N_("Game info"),
 	    N_("Displays game infos."),
@@ -1958,7 +1983,7 @@ void InitKeymapActions()
 	    },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "ChatLog",
 	    N_("Chat Log"),
 	    N_("Displays chat log."),
@@ -1966,7 +1991,7 @@ void InitKeymapActions()
 	    [] {
 		    ToggleChatLog();
 	    });
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "SortInv",
 	    N_("Sort Inventory"),
 	    N_("Sorts the inventory."),
@@ -1975,13 +2000,13 @@ void InitKeymapActions()
 		    ReorganizeInventory(*MyPlayer);
 	    });
 #ifdef _DEBUG
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "OpenConsole",
 	    N_("Console"),
 	    N_("Opens Lua console."),
 	    SDLK_BACKQUOTE,
 	    OpenConsole);
-	sgOptions.Keymapper.AddAction(
+	options.Keymapper.AddAction(
 	    "DebugToggle",
 	    "Debug toggle",
 	    "Programming is like magic.",
@@ -1990,13 +2015,14 @@ void InitKeymapActions()
 		    DebugToggle = !DebugToggle;
 	    });
 #endif
-	sgOptions.Keymapper.CommitActions();
+	options.Keymapper.CommitActions();
 }
 
 void InitPadmapActions()
 {
+	Options &options = GetOptions();
 	for (int i = 0; i < 8; ++i) {
-		sgOptions.Padmapper.AddAction(
+		options.Padmapper.AddAction(
 		    "BeltItem{}",
 		    N_("Belt item {}"),
 		    N_("Use Belt item."),
@@ -2012,7 +2038,7 @@ void InitPadmapActions()
 		    i + 1);
 	}
 	for (uint32_t i = 0; i < NumHotkeys; ++i) {
-		sgOptions.Padmapper.AddAction(
+		options.Padmapper.AddAction(
 		    "QuickSpell{}",
 		    N_("Quick spell {}"),
 		    N_("Hotkey for skill or spell."),
@@ -2022,16 +2048,16 @@ void InitPadmapActions()
 				    SetSpeedSpell(i);
 				    return;
 			    }
-			    if (!*sgOptions.Gameplay.quickCast)
+			    if (!*GetOptions().Gameplay.quickCast)
 				    ToggleSpell(i);
 			    else
 				    QuickCast(i);
 		    },
 		    nullptr,
-		    CanPlayerTakeAction,
+		    []() { return CanPlayerTakeAction() && !InGameMenu(); },
 		    i + 1);
 	}
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "PrimaryAction",
 	    N_("Primary action"),
 	    N_("Attack monsters, talk to towners, lift and place inventory items."),
@@ -2046,7 +2072,7 @@ void InitPadmapActions()
 		    LastMouseButtonAction = MouseActionType::None;
 	    },
 	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "SecondaryAction",
 	    N_("Secondary action"),
 	    N_("Open chests, interact with doors, pick up items."),
@@ -2061,7 +2087,7 @@ void InitPadmapActions()
 		    LastMouseButtonAction = MouseActionType::None;
 	    },
 	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "SpellAction",
 	    N_("Spell action"),
 	    N_("Cast the active spell."),
@@ -2075,8 +2101,8 @@ void InitPadmapActions()
 		    ControllerActionHeld = GameActionType_NONE;
 		    LastMouseButtonAction = MouseActionType::None;
 	    },
-	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	    []() { return CanPlayerTakeAction() && !InGameMenu(); });
+	options.Padmapper.AddAction(
 	    "CancelAction",
 	    N_("Cancel action"),
 	    N_("Close menus."),
@@ -2102,37 +2128,37 @@ void InitPadmapActions()
 	    },
 	    nullptr,
 	    [] { return DoomFlag || SpellSelectFlag || invflag || SpellbookFlag || QuestLogIsOpen || CharFlag; });
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "MoveUp",
 	    N_("Move up"),
 	    N_("Moves the player character up."),
 	    ControllerButton_BUTTON_DPAD_UP,
 	    [] {});
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "MoveDown",
 	    N_("Move down"),
 	    N_("Moves the player character down."),
 	    ControllerButton_BUTTON_DPAD_DOWN,
 	    [] {});
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "MoveLeft",
 	    N_("Move left"),
 	    N_("Moves the player character left."),
 	    ControllerButton_BUTTON_DPAD_LEFT,
 	    [] {});
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "MoveRight",
 	    N_("Move right"),
 	    N_("Moves the player character right."),
 	    ControllerButton_BUTTON_DPAD_RIGHT,
 	    [] {});
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "StandGround",
 	    N_("Stand ground"),
 	    N_("Hold to prevent the player from moving."),
 	    ControllerButton_NONE,
 	    [] {});
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "ToggleStandGround",
 	    N_("Toggle stand ground"),
 	    N_("Toggle whether the player moves."),
@@ -2140,7 +2166,7 @@ void InitPadmapActions()
 	    [] { StandToggle = !StandToggle; },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "UseHealthPotion",
 	    N_("Use health potion"),
 	    N_("Use health potions from belt."),
@@ -2148,7 +2174,7 @@ void InitPadmapActions()
 	    [] { UseBeltItem(BeltItemType::Healing); },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "UseManaPotion",
 	    N_("Use mana potion"),
 	    N_("Use mana potions from belt."),
@@ -2156,15 +2182,17 @@ void InitPadmapActions()
 	    [] { UseBeltItem(BeltItemType::Mana); },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "Character",
 	    N_("Character"),
 	    N_("Open Character screen."),
 	    ControllerButton_AXIS_TRIGGERLEFT,
 	    [] {
 		    ProcessGameAction(GameAction { GameActionType_TOGGLE_CHARACTER_INFO });
-	    });
-	sgOptions.Padmapper.AddAction(
+	    },
+	    nullptr,
+	    []() { return CanPlayerTakeAction() && !InGameMenu(); });
+	options.Padmapper.AddAction(
 	    "Inventory",
 	    N_("Inventory"),
 	    N_("Open Inventory screen."),
@@ -2173,8 +2201,8 @@ void InitPadmapActions()
 		    ProcessGameAction(GameAction { GameActionType_TOGGLE_INVENTORY });
 	    },
 	    nullptr,
-	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	    []() { return CanPlayerTakeAction() && !InGameMenu(); });
+	options.Padmapper.AddAction(
 	    "QuestLog",
 	    N_("Quest log"),
 	    N_("Open Quest log."),
@@ -2183,8 +2211,8 @@ void InitPadmapActions()
 		    ProcessGameAction(GameAction { GameActionType_TOGGLE_QUEST_LOG });
 	    },
 	    nullptr,
-	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	    []() { return CanPlayerTakeAction() && !InGameMenu(); });
+	options.Padmapper.AddAction(
 	    "SpellBook",
 	    N_("Spellbook"),
 	    N_("Open Spellbook."),
@@ -2193,8 +2221,8 @@ void InitPadmapActions()
 		    ProcessGameAction(GameAction { GameActionType_TOGGLE_SPELL_BOOK });
 	    },
 	    nullptr,
-	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	    []() { return CanPlayerTakeAction() && !InGameMenu(); });
+	options.Padmapper.AddAction(
 	    "DisplaySpells",
 	    N_("Speedbook"),
 	    N_("Open Speedbook."),
@@ -2203,58 +2231,58 @@ void InitPadmapActions()
 		    ProcessGameAction(GameAction { GameActionType_TOGGLE_QUICK_SPELL_MENU });
 	    },
 	    nullptr,
-	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	    []() { return CanPlayerTakeAction() && !InGameMenu(); });
+	options.Padmapper.AddAction(
 	    "Toggle Automap",
 	    N_("Toggle automap"),
 	    N_("Toggles if automap is displayed."),
 	    ControllerButton_BUTTON_LEFTSTICK,
 	    DoAutoMap);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "MouseUp",
 	    N_("Move mouse up"),
 	    N_("Simulates upward mouse movement."),
 	    { ControllerButton_BUTTON_BACK, ControllerButton_BUTTON_DPAD_UP },
 	    [] {});
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "MouseDown",
 	    N_("Move mouse down"),
 	    N_("Simulates downward mouse movement."),
 	    { ControllerButton_BUTTON_BACK, ControllerButton_BUTTON_DPAD_DOWN },
 	    [] {});
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "MouseLeft",
 	    N_("Move mouse left"),
 	    N_("Simulates leftward mouse movement."),
 	    { ControllerButton_BUTTON_BACK, ControllerButton_BUTTON_DPAD_LEFT },
 	    [] {});
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "MouseRight",
 	    N_("Move mouse right"),
 	    N_("Simulates rightward mouse movement."),
 	    { ControllerButton_BUTTON_BACK, ControllerButton_BUTTON_DPAD_RIGHT },
 	    [] {});
 	auto leftMouseDown = [] {
-		ControllerButtonCombo standGroundCombo = sgOptions.Padmapper.ButtonComboForAction("StandGround");
+		ControllerButtonCombo standGroundCombo = GetOptions().Padmapper.ButtonComboForAction("StandGround");
 		bool standGround = StandToggle || IsControllerButtonComboPressed(standGroundCombo);
 		sgbMouseDown = CLICK_LEFT;
 		LeftMouseDown(standGround ? KMOD_SHIFT : KMOD_NONE);
 	};
 	auto leftMouseUp = [] {
-		ControllerButtonCombo standGroundCombo = sgOptions.Padmapper.ButtonComboForAction("StandGround");
+		ControllerButtonCombo standGroundCombo = GetOptions().Padmapper.ButtonComboForAction("StandGround");
 		bool standGround = StandToggle || IsControllerButtonComboPressed(standGroundCombo);
 		LastMouseButtonAction = MouseActionType::None;
 		sgbMouseDown = CLICK_NONE;
 		LeftMouseUp(standGround ? KMOD_SHIFT : KMOD_NONE);
 	};
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "LeftMouseClick1",
 	    N_("Left mouse click"),
 	    N_("Simulates the left mouse button."),
 	    ControllerButton_BUTTON_RIGHTSTICK,
 	    leftMouseDown,
 	    leftMouseUp);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "LeftMouseClick2",
 	    N_("Left mouse click"),
 	    N_("Simulates the left mouse button."),
@@ -2262,7 +2290,7 @@ void InitPadmapActions()
 	    leftMouseDown,
 	    leftMouseUp);
 	auto rightMouseDown = [] {
-		ControllerButtonCombo standGroundCombo = sgOptions.Padmapper.ButtonComboForAction("StandGround");
+		ControllerButtonCombo standGroundCombo = GetOptions().Padmapper.ButtonComboForAction("StandGround");
 		bool standGround = StandToggle || IsControllerButtonComboPressed(standGroundCombo);
 		LastMouseButtonAction = MouseActionType::None;
 		sgbMouseDown = CLICK_RIGHT;
@@ -2272,28 +2300,28 @@ void InitPadmapActions()
 		LastMouseButtonAction = MouseActionType::None;
 		sgbMouseDown = CLICK_NONE;
 	};
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "RightMouseClick1",
 	    N_("Right mouse click"),
 	    N_("Simulates the right mouse button."),
 	    { ControllerButton_BUTTON_BACK, ControllerButton_BUTTON_RIGHTSTICK },
 	    rightMouseDown,
 	    rightMouseUp);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "RightMouseClick2",
 	    N_("Right mouse click"),
 	    N_("Simulates the right mouse button."),
 	    { ControllerButton_BUTTON_BACK, ControllerButton_BUTTON_RIGHTSHOULDER },
 	    rightMouseDown,
 	    rightMouseUp);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "PadHotspellMenu",
 	    N_("Gamepad hotspell menu"),
 	    N_("Hold to set or use spell hotkeys."),
 	    ControllerButton_BUTTON_BACK,
 	    [] { PadHotspellMenuActive = true; },
 	    [] { PadHotspellMenuActive = false; });
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "PadMenuNavigator",
 	    N_("Gamepad menu navigator"),
 	    N_("Hold to access gamepad menu navigation."),
@@ -2309,7 +2337,7 @@ void InitPadmapActions()
 		if (!inMenu)
 			gamemenu_on();
 	};
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "ToggleGameMenu1",
 	    N_("Toggle game menu"),
 	    N_("Opens the game menu."),
@@ -2318,7 +2346,7 @@ void InitPadmapActions()
 	        ControllerButton_BUTTON_START,
 	    },
 	    toggleGameMenu);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "ToggleGameMenu2",
 	    N_("Toggle game menu"),
 	    N_("Opens the game menu."),
@@ -2327,7 +2355,7 @@ void InitPadmapActions()
 	        ControllerButton_BUTTON_BACK,
 	    },
 	    toggleGameMenu);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "QuickSave",
 	    N_("Quick save"),
 	    N_("Saves the game."),
@@ -2335,29 +2363,29 @@ void InitPadmapActions()
 	    [] { gamemenu_save_game(false); },
 	    nullptr,
 	    [&]() { return !gbIsMultiplayer && CanPlayerTakeAction(); });
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "QuickLoad",
 	    N_("Quick load"),
 	    N_("Loads the game."),
 	    ControllerButton_NONE,
 	    [] { gamemenu_load_game(false); },
 	    nullptr,
-	    [&]() { return !gbIsMultiplayer && gbValidSaveFile && ActiveStore == TalkID::None && IsGameRunning(); });
-	sgOptions.Padmapper.AddAction(
+	    [&]() { return !gbIsMultiplayer && gbValidSaveFile && !IsPlayerInStore() && IsGameRunning(); });
+	options.Padmapper.AddAction(
 	    "Item Highlighting",
 	    N_("Item highlighting"),
 	    N_("Show/hide items on ground."),
 	    ControllerButton_NONE,
 	    [] { HighlightKeyPressed(true); },
 	    [] { HighlightKeyPressed(false); });
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "Toggle Item Highlighting",
 	    N_("Toggle item highlighting"),
 	    N_("Permanent show/hide items on ground."),
 	    ControllerButton_NONE,
 	    nullptr,
 	    [] { ToggleItemLabelHighlight(); });
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "Hide Info Screens",
 	    N_("Hide Info Screens"),
 	    N_("Hide all info screens."),
@@ -2381,40 +2409,40 @@ void InitPadmapActions()
 	    },
 	    nullptr,
 	    IsGameRunning);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "Zoom",
 	    N_("Zoom"),
 	    N_("Zoom Game Screen."),
 	    ControllerButton_NONE,
 	    [] {
-		    sgOptions.Graphics.zoom.SetValue(!*sgOptions.Graphics.zoom);
+		    GetOptions().Graphics.zoom.SetValue(!*GetOptions().Graphics.zoom);
 		    CalcViewportGeometry();
 	    },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "Pause Game",
 	    N_("Pause Game"),
 	    N_("Pauses the game."),
 	    ControllerButton_NONE,
 	    diablo_pause_game);
-	sgOptions.Padmapper.AddAction(
-	    "DecreaseGamma",
-	    N_("Decrease Gamma"),
+	options.Padmapper.AddAction(
+	    "DecreaseBrightness",
+	    N_("Decrease Brightness"),
 	    N_("Reduce screen brightness."),
 	    ControllerButton_NONE,
-	    DecreaseGamma,
+	    DecreaseBrightness,
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
-	    "IncreaseGamma",
-	    N_("Increase Gamma"),
+	options.Padmapper.AddAction(
+	    "IncreaseBrightness",
+	    N_("Increase Brightness"),
 	    N_("Increase screen brightness."),
 	    ControllerButton_NONE,
-	    IncreaseGamma,
+	    IncreaseBrightness,
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "Help",
 	    N_("Help"),
 	    N_("Open Help Screen."),
@@ -2422,14 +2450,14 @@ void InitPadmapActions()
 	    HelpKeyPressed,
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "Screenshot",
 	    N_("Screenshot"),
 	    N_("Takes a screenshot."),
 	    ControllerButton_NONE,
 	    nullptr,
 	    CaptureScreen);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "GameInfo",
 	    N_("Game info"),
 	    N_("Displays game infos."),
@@ -2443,7 +2471,7 @@ void InitPadmapActions()
 	    },
 	    nullptr,
 	    CanPlayerTakeAction);
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "SortInv",
 	    N_("Sort Inventory"),
 	    N_("Sorts the inventory."),
@@ -2451,7 +2479,7 @@ void InitPadmapActions()
 	    [] {
 		    ReorganizeInventory(*MyPlayer);
 	    });
-	sgOptions.Padmapper.AddAction(
+	options.Padmapper.AddAction(
 	    "ChatLog",
 	    N_("Chat Log"),
 	    N_("Displays chat log."),
@@ -2459,7 +2487,7 @@ void InitPadmapActions()
 	    [] {
 		    ToggleChatLog();
 	    });
-	sgOptions.Padmapper.CommitActions();
+	options.Padmapper.CommitActions();
 }
 
 void SetCursorPos(Point position)
@@ -2571,12 +2599,14 @@ int DiabloMain(int argc, char **argv)
 
 	// Read settings including translation next. This will use the presence of fonts.mpq and look for assets in devilutionx.mpq
 	LoadOptions();
+	if (demo::IsRunning()) demo::OverrideOptions();
+
 	// Then look for a voice pack file based on the selected translation
 	LoadLanguageArchive();
 
 	ApplicationInit();
 	LuaInitialize();
-	SaveOptions();
+	if (!demo::IsRunning()) SaveOptions();
 
 	// Finally load game data
 	LoadGameArchives();
@@ -2595,7 +2625,7 @@ int DiabloMain(int argc, char **argv)
 #ifdef __UWP__
 	onInitialized();
 #endif
-	SaveOptions();
+	if (!demo::IsRunning()) SaveOptions();
 
 	DiabloSplash();
 	mainmenu_loop();
@@ -2682,17 +2712,16 @@ bool TryIconCurs()
 	if (pcurs == CURSOR_TELEPORT) {
 		const SpellID spellID = myPlayer.inventorySpell;
 		const SpellType spellType = SpellType::Scroll;
-		const int spellLevel = myPlayer.GetSpellLevel(spellID);
 		const int spellFrom = myPlayer.spellFrom;
 		if (IsWallSpell(spellID)) {
 			Direction sd = GetDirection(myPlayer.position.tile, cursPosition);
-			NetSendCmdLocParam5(true, CMD_SPELLXYD, cursPosition, static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), static_cast<uint16_t>(sd), spellLevel, spellFrom);
+			NetSendCmdLocParam4(true, CMD_SPELLXYD, cursPosition, static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), static_cast<uint16_t>(sd), spellFrom);
 		} else if (pcursmonst != -1) {
-			NetSendCmdParam5(true, CMD_SPELLID, pcursmonst, static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), spellLevel, spellFrom);
+			NetSendCmdParam4(true, CMD_SPELLID, pcursmonst, static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), spellFrom);
 		} else if (PlayerUnderCursor != nullptr && !myPlayer.friendlyMode) {
-			NetSendCmdParam5(true, CMD_SPELLPID, PlayerUnderCursor->getId(), static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), spellLevel, spellFrom);
+			NetSendCmdParam4(true, CMD_SPELLPID, PlayerUnderCursor->getId(), static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), spellFrom);
 		} else {
-			NetSendCmdLocParam4(true, CMD_SPELLXY, cursPosition, static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), spellLevel, spellFrom);
+			NetSendCmdLocParam3(true, CMD_SPELLXY, cursPosition, static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), spellFrom);
 		}
 		NewCursor(CURSOR_HAND);
 		return true;
@@ -2792,7 +2821,7 @@ bool PressEscKey()
 		rv = true;
 	}
 
-	if (ActiveStore != TalkID::None) {
+	if (IsPlayerInStore()) {
 		StoreESC();
 		rv = true;
 	}
@@ -3292,7 +3321,7 @@ bool game_loop(bool bStartup)
 
 void diablo_color_cyc_logic()
 {
-	if (!*sgOptions.Graphics.colorCycling)
+	if (!*GetOptions().Graphics.colorCycling)
 		return;
 
 	if (PauseMode != 0)

@@ -10,7 +10,10 @@
 
 #include "items.h"
 #include "monstdat.h"
+#include "msg.h"
 #include "player.h"
+#include "spells.h"
+#include "utils/is_of.hpp"
 
 namespace devilution {
 
@@ -80,12 +83,12 @@ bool IsUniqueMonsterItemValid(uint16_t iCreateInfo, uint32_t dwBuff)
 
 	// Check all unique monster levels to see if they match the item level
 	for (const UniqueMonsterData &uniqueMonsterData : UniqueMonstersData) {
-		const auto &uniqueMonsterLevel = static_cast<uint8_t>(MonstersData[uniqueMonsterData.mtype].level);
-
 		if (IsAnyOf(uniqueMonsterData.mtype, MT_DEFILER, MT_NAKRUL, MT_HORKDMN)) {
 			// These monsters don't use their mlvl for item generation
 			continue;
 		}
+
+		const auto &uniqueMonsterLevel = static_cast<uint8_t>(MonstersData[uniqueMonsterData.mtype].level);
 
 		if (level == uniqueMonsterLevel) {
 			// If the ilvl matches the mlvl, we confirm the item is legitimate
@@ -102,18 +105,19 @@ bool IsDungeonItemValid(uint16_t iCreateInfo, uint32_t dwBuff)
 	const bool isHellfireItem = (dwBuff & CF_HELLFIRE) != 0;
 
 	// Check all monster levels to see if they match the item level
-	for (int16_t i = 0; i < static_cast<int16_t>(NUM_MTYPES); i++) {
-		const auto &monsterData = MonstersData[i];
+	int type = -1;
+	for (const MonsterData &monsterData : MonstersData) {
+		type++;
 		auto monsterLevel = static_cast<uint8_t>(monsterData.level);
 
-		if (i != MT_DIABLO && monsterData.availability == MonsterAvailability::Never) {
+		if (type != MT_DIABLO && monsterData.availability == MonsterAvailability::Never) {
 			// Skip monsters that are unable to appear in the game
 			continue;
 		}
 
-		if (i == MT_DIABLO && !isHellfireItem) {
-			// Adjust The Dark Lord's mlvl if the item isn't a Hellfire item to match the Diablo mlvl
-			monsterLevel -= 15;
+		if (type == MT_DIABLO && isHellfireItem) {
+			// Adjust The Dark Lord's mlvl if the item is a Hellfire item to match the Diablo mlvl
+			monsterLevel += 15;
 		}
 
 		if (level == monsterLevel) {
@@ -137,26 +141,57 @@ bool IsDungeonItemValid(uint16_t iCreateInfo, uint32_t dwBuff)
 	return level <= (diabloMaxDungeonLevel * 2);
 }
 
+bool IsHellfireSpellBookValid(const Item &spellBook)
+{
+	// Hellfire uses the spell book level when generating items via CreateSpellBook()
+	int spellBookLevel = GetSpellBookLevel(spellBook._iSpell);
+
+	// CreateSpellBook() adds 1 to the spell level for ilvl
+	spellBookLevel++;
+
+	if (spellBookLevel >= 1 && (spellBook._iCreateInfo & CF_LEVEL) == spellBookLevel * 2) {
+		// The ilvl matches the result for a spell book drop, so we confirm the item is legitimate
+		return true;
+	}
+
+	return IsDungeonItemValid(spellBook._iCreateInfo, spellBook.dwBuff);
+}
+
 bool IsItemValid(const Player &player, const Item &item)
 {
 	if (!gbIsMultiplayer)
 		return true;
 
+	if (item.IDidx == IDI_EAR)
+		return true;
 	if (item.IDidx != IDI_GOLD && !IsCreationFlagComboValid(item._iCreateInfo))
 		return false;
+	if ((item._iCreateInfo & CF_TOWN) != 0)
+		return IsTownItemValid(item._iCreateInfo, player) && IsShopPriceValid(item);
+	if ((item._iCreateInfo & CF_USEFUL) == CF_UPER15)
+		return IsUniqueMonsterItemValid(item._iCreateInfo, item.dwBuff);
+	if ((item.dwBuff & CF_HELLFIRE) != 0 && AllItemsList[item.IDidx].iMiscId == IMISC_BOOK)
+		return IsHellfireSpellBookValid(item);
 
-	if ((item._iCreateInfo & CF_TOWN) != 0) {
-		if (!IsTownItemValid(item._iCreateInfo, player) || !IsShopPriceValid(item))
-			return false;
-	} else if ((item._iCreateInfo & CF_USEFUL) == CF_UPER15) {
-		if (!IsUniqueMonsterItemValid(item._iCreateInfo, item.dwBuff))
-			return false;
-	}
+	return IsDungeonItemValid(item._iCreateInfo, item.dwBuff);
+}
 
-	if (!IsDungeonItemValid(item._iCreateInfo, item.dwBuff))
+bool IsItemDeltaValid(const TCmdPItem &itemDelta)
+{
+	if (itemDelta.bCmd == CMD_INVALID)
+		return true;
+	if (IsNoneOf(itemDelta.bCmd, TCmdPItem::FloorItem, TCmdPItem::PickedUpItem, TCmdPItem::DroppedItem))
 		return false;
-
-	return true;
+	if (!InDungeonBounds({ itemDelta.x, itemDelta.y }))
+		return false;
+	_item_indexes idx = static_cast<_item_indexes>(SDL_SwapLE16(itemDelta.def.wIndx));
+	if (idx == IDI_EAR)
+		return true;
+	if (!IsItemAvailable(idx))
+		return false;
+	Item item = {};
+	RecreateItem(*MyPlayer, itemDelta.item, item);
+	return IsItemValid(*MyPlayer, item);
 }
 
 } // namespace devilution

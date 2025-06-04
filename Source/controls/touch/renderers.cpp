@@ -4,10 +4,10 @@
 #include "cursor.h"
 #include "diablo.h"
 #include "doom.h"
-#include "engine.h"
 #include "engine/events.hpp"
 #include "engine/render/clx_render.hpp"
-#include "init.h"
+#include "engine/render/primitive_render.hpp"
+#include "init.hpp"
 #include "inv.h"
 #include "levels/gendung.h"
 #include "minitext.h"
@@ -405,7 +405,7 @@ VirtualGamepadButtonType PrimaryActionButtonRenderer::GetButtonType()
 
 VirtualGamepadButtonType PrimaryActionButtonRenderer::GetTownButtonType()
 {
-	if (ActiveStore != TalkID::None || pcursmonst != -1)
+	if (IsPlayerInStore() || pcursmonst != -1)
 		return GetTalkButtonType(virtualPadButton->isHeld);
 	return GetBlankButtonType(virtualPadButton->isHeld);
 }

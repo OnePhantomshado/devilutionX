@@ -8,8 +8,10 @@
 
 #include "DiabloUI/diabloui.h"
 #include "DiabloUI/settingsmenu.h"
+#include "engine/assets.hpp"
 #include "engine/demomode.h"
-#include "init.h"
+#include "game_mode.hpp"
+#include "init.hpp"
 #include "movie.h"
 #include "options.h"
 #include "pfile.h"
@@ -100,7 +102,7 @@ bool mainmenu_select_hero_dialog(GameData *gameData)
 		pfile_ui_set_hero_infos(DummyGetHeroInfo);
 		gbLoadGame = true;
 	} else if (!gbIsMultiplayer) {
-		pSaveNumberFromOptions = gbIsHellfire ? &sgOptions.Hellfire.lastSinglePlayerHero : &sgOptions.Diablo.lastSinglePlayerHero;
+		pSaveNumberFromOptions = gbIsHellfire ? &GetOptions().Hellfire.lastSinglePlayerHero : &GetOptions().Diablo.lastSinglePlayerHero;
 		gSaveNumber = **pSaveNumberFromOptions;
 		UiSelHeroSingDialog(
 		    pfile_ui_set_hero_infos,
@@ -113,7 +115,7 @@ bool mainmenu_select_hero_dialog(GameData *gameData)
 
 		gbLoadGame = (dlgresult == SELHERO_CONTINUE);
 	} else {
-		pSaveNumberFromOptions = gbIsHellfire ? &sgOptions.Hellfire.lastMultiplayerHero : &sgOptions.Diablo.lastMultiplayerHero;
+		pSaveNumberFromOptions = gbIsHellfire ? &GetOptions().Hellfire.lastMultiplayerHero : &GetOptions().Diablo.lastMultiplayerHero;
 		gSaveNumber = **pSaveNumberFromOptions;
 		UiSelHeroMultDialog(
 		    pfile_ui_set_hero_infos,
@@ -166,7 +168,7 @@ void mainmenu_loop()
 				done = true;
 			break;
 		case MAINMENU_ATTRACT_MODE:
-			if (gbIsSpawn && !HaveDiabdat())
+			if (gbIsSpawn && !HaveIntro())
 				done = false;
 			else if (gbActive)
 				PlayIntro();

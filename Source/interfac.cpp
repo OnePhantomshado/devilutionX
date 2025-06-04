@@ -12,7 +12,7 @@
 #include <expected.hpp>
 
 #include "control.h"
-#include "engine.h"
+#include "controls/input.h"
 #include "engine/clx_sprite.hpp"
 #include "engine/dx.h"
 #include "engine/events.hpp"
@@ -20,9 +20,12 @@
 #include "engine/load_clx.hpp"
 #include "engine/palette.h"
 #include "engine/render/clx_render.hpp"
+#include "engine/render/primitive_render.hpp"
+#include "game_mode.hpp"
+#include "headless_mode.hpp"
 #include "hwcursor.hpp"
-#include "init.h"
 #include "loadsave.h"
+#include "multi.h"
 #include "pfile.h"
 #include "plrmsg.h"
 #include "utils/log.hpp"
@@ -53,8 +56,7 @@ const int BarPos[3][2] = { { 53, 37 }, { 53, 421 }, { 53, 37 } };
 
 OptionalOwnedClxSpriteList ArtCutsceneWidescreen;
 
-SdlEventType CustomEventsBegin = SDL_USEREVENT;
-constexpr uint16_t NumCustomEvents = WM_LAST - WM_FIRST + 1;
+SdlEventType CustomEventType = SDL_USEREVENT;
 
 Cutscenes GetCutSceneFromLevelType(dungeon_type type)
 {
@@ -392,15 +394,21 @@ void DoLoad(interface_mode uMsg)
 
 	if (!loadResult.has_value()) {
 		SDL_Event event;
-		event.type = CustomEventToSdlEvent(WM_ERROR);
+		CustomEventToSdlEvent(event, WM_ERROR);
 		event.user.data1 = new std::string(std::move(loadResult).error());
-		SDL_PushEvent(&event);
+		if (SDL_PushEvent(&event) < 0) {
+			LogError("Failed to send WM_ERROR {}", SDL_GetError());
+			SDL_ClearError();
+		}
 		return;
 	}
 
 	SDL_Event event;
-	event.type = CustomEventToSdlEvent(WM_DONE);
-	SDL_PushEvent(&event);
+	CustomEventToSdlEvent(event, WM_DONE);
+	if (SDL_PushEvent(&event) < 0) {
+		LogError("Failed to send WM_DONE {}", SDL_GetError());
+		SDL_ClearError();
+	}
 }
 
 struct {
@@ -439,7 +447,7 @@ void InitRendering()
 void CheckShouldSkipRendering()
 {
 	if (!ProgressEventHandlerState.skipRendering) return;
-	const bool shouldSkip = ProgressEventHandlerState.loadStartedAt + *sgOptions.Gameplay.skipLoadingScreenThresholdMs > SDL_GetTicks();
+	const bool shouldSkip = ProgressEventHandlerState.loadStartedAt + *GetOptions().Gameplay.skipLoadingScreenThresholdMs > SDL_GetTicks();
 	if (shouldSkip) return;
 	ProgressEventHandlerState.skipRendering = false;
 	if (!HeadlessMode) InitRendering();
@@ -450,7 +458,7 @@ void ProgressEventHandler(const SDL_Event &event, uint16_t modState)
 	DisableInputEventHandler(event, modState);
 	if (!IsCustomEvent(event.type)) return;
 
-	const interface_mode customEvent = GetCustomEvent(event.type);
+	const interface_mode customEvent = GetCustomEvent(event);
 	switch (customEvent) {
 	case WM_PROGRESS:
 		if (!HeadlessMode && ProgressEventHandlerState.drawnProgress != sgdwProgress && !ProgressEventHandlerState.skipRendering) {
@@ -471,7 +479,7 @@ void ProgressEventHandler(const SDL_Event &event, uint16_t modState)
 				if (RenderDirectlyToOutputSurface && PalSurface != nullptr) {
 					// The loading thread sets `orig_palette`, so we make sure to use
 					// our own palette for drawing the foreground.
-					ApplyGamma(logical_palette, ProgressEventHandlerState.palette, 256);
+					ApplyToneMapping(logical_palette, ProgressEventHandlerState.palette, 256);
 
 					// Ensure that all back buffers have the full progress bar.
 					const void *initialPixels = PalSurface->pixels;
@@ -522,23 +530,24 @@ void ProgressEventHandler(const SDL_Event &event, uint16_t modState)
 void RegisterCustomEvents()
 {
 #ifndef USE_SDL1
-	CustomEventsBegin = SDL_RegisterEvents(NumCustomEvents);
+	CustomEventType = SDL_RegisterEvents(1);
 #endif
 }
 
 bool IsCustomEvent(SdlEventType eventType)
 {
-	return eventType >= CustomEventsBegin && eventType < CustomEventsBegin + NumCustomEvents;
+	return eventType == CustomEventType;
 }
 
-interface_mode GetCustomEvent(SdlEventType eventType)
+interface_mode GetCustomEvent(const SDL_Event &event)
 {
-	return static_cast<interface_mode>(eventType - CustomEventsBegin);
+	return static_cast<interface_mode>(event.user.code);
 }
 
-SdlEventType CustomEventToSdlEvent(interface_mode eventType)
+void CustomEventToSdlEvent(SDL_Event &event, interface_mode eventType)
 {
-	return CustomEventsBegin + eventType;
+	event.type = CustomEventType;
+	event.user.code = static_cast<int>(eventType);
 }
 
 void interface_msg_pump()
@@ -562,8 +571,11 @@ void IncProgress(uint32_t steps)
 		sgdwProgress = MaxProgress;
 	if (!HeadlessMode && sgdwProgress != prevProgress) {
 		SDL_Event event;
-		event.type = CustomEventToSdlEvent(WM_PROGRESS);
-		SDL_PushEvent(&event);
+		CustomEventToSdlEvent(event, WM_PROGRESS);
+		if (SDL_PushEvent(&event) < 0) {
+			LogError("Failed to send WM_PROGRESS {}", SDL_GetError());
+			SDL_ClearError();
+		}
 	}
 }
 
@@ -623,20 +635,25 @@ void ShowProgress(interface_mode uMsg)
 		LogVerbose("Load thread finished in {}ms", SDL_GetTicks() - start);
 	});
 
+	const auto processEvent = [&](const SDL_Event &event) {
+		CheckShouldSkipRendering();
+		if (event.type != SDL_QUIT) {
+			HandleMessage(event, SDL_GetModState());
+		}
+		if (ProgressEventHandlerState.done) {
+			loadThread.join();
+			return false;
+		}
+		return true;
+	};
+
 	while (true) {
 		CheckShouldSkipRendering();
 		SDL_Event event;
-		// We use the real `SDL_PollEvent` here instead of `FetchEvent`
+		// We use the real `PollEvent` here instead of `FetchMessage`
 		// to process real events rather than the recorded ones in demo mode.
-		while (SDL_PollEvent(&event)) {
-			CheckShouldSkipRendering();
-			if (event.type != SDL_QUIT) {
-				HandleMessage(event, SDL_GetModState());
-			}
-			if (ProgressEventHandlerState.done) {
-				loadThread.join();
-				return;
-			}
+		while (PollEvent(&event)) {
+			if (!processEvent(event)) return;
 		}
 	}
 }

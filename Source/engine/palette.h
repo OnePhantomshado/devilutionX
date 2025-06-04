@@ -8,6 +8,8 @@
 #include <array>
 #include <cstdint>
 
+#include <SDL.h>
+
 #include "levels/gendung.h"
 
 namespace devilution {
@@ -35,30 +37,15 @@ namespace devilution {
 extern std::array<SDL_Color, 256> logical_palette;
 extern std::array<SDL_Color, 256> system_palette;
 extern std::array<SDL_Color, 256> orig_palette;
-/** Lookup table for transparency */
-extern Uint8 paletteTransparencyLookup[256][256];
-
-#if DEVILUTIONX_PALETTE_TRANSPARENCY_BLACK_16_LUT
-/**
- * A lookup table from black for a pair of colors.
- *
- * For a pair of colors i and j, the index `i | (j << 8)` contains
- * `paletteTransparencyLookup[0][i] | (paletteTransparencyLookup[0][j] << 8)`.
- *
- * On big-endian platforms, the indices are encoded as `j | (i << 8)`, while the
- * value order remains the same.
- */
-extern uint16_t paletteTransparencyLookupBlack16[65536];
-#endif
 
 void palette_update(int first = 0, int ncolor = 256);
 void palette_init();
 void LoadPalette(const char *pszFileName, bool blend = true);
 void LoadRndLvlPal(dungeon_type l);
-void IncreaseGamma();
-void ApplyGamma(std::array<SDL_Color, 256> &dst, const std::array<SDL_Color, 256> &src, int n);
-void DecreaseGamma();
-int UpdateGamma(int gamma);
+void IncreaseBrightness();
+void ApplyToneMapping(std::array<SDL_Color, 256> &dst, const std::array<SDL_Color, 256> &src, int n);
+void DecreaseBrightness();
+int UpdateBrightness(int sliderValue);
 void BlackPalette();
 void SetFadeLevel(int fadeval, bool updateHardwareCursor = true, const std::array<SDL_Color, 256> &srcPalette = logical_palette);
 /**

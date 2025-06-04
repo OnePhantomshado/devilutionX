@@ -15,7 +15,7 @@
 #include "engine/rectangle.hpp"
 #include "engine/render/clx_render.hpp"
 #include "engine/render/text_render.hpp"
-#include "init.h"
+#include "game_mode.hpp"
 #include "missiles.h"
 #include "panels/spell_icons.hpp"
 #include "panels/ui_panels.hpp"
@@ -55,22 +55,8 @@ const SpellID SpellPages[SpellBookPages][SpellBookPageEntries] = {
 SpellID GetSpellFromSpellPage(size_t page, size_t entry)
 {
 	assert(page <= SpellBookPages && entry <= SpellBookPageEntries);
-	if (page == 0 && entry == 0) {
-		switch (InspectPlayer->_pClass) {
-		case HeroClass::Warrior:
-			return SpellID::ItemRepair;
-		case HeroClass::Rogue:
-			return SpellID::TrapDisarm;
-		case HeroClass::Sorcerer:
-			return SpellID::StaffRecharge;
-		case HeroClass::Monk:
-			return SpellID::Search;
-		case HeroClass::Bard:
-			return SpellID::Identify;
-		case HeroClass::Barbarian:
-			return SpellID::Rage;
-		}
-	}
+	if (page == 0 && entry == 0)
+		return GetPlayerStartingLoadoutForClass(InspectPlayer->_pClass).skill;
 	return SpellPages[page][entry];
 }
 
@@ -89,7 +75,7 @@ void PrintSBookStr(const Surface &out, Point position, std::string_view text, Ui
 SpellType GetSBookTrans(SpellID ii, bool townok)
 {
 	Player &player = *InspectPlayer;
-	if ((player._pClass == HeroClass::Monk) && (ii == SpellID::Search))
+	if (ii == GetPlayerStartingLoadoutForClass(player._pClass).skill)
 		return SpellType::Skill;
 	SpellType st = SpellType::Spell;
 	if ((player._pISpells & GetSpellBitmask(ii)) != 0) {
