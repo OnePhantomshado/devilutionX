@@ -51,6 +51,7 @@ enum monster_flag : uint16_t {
 	MFLAG_NO_ENEMY        = 1 << 10,
 	MFLAG_BERSERK         = 1 << 11,
 	MFLAG_NOLIFESTEAL     = 1 << 12,
+	MFLAG_ALLY = 1 << 13, // Custom: Marks monster as a player ally
 	// clang-format on
 };
 
