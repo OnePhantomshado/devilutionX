@@ -1,12 +1,8 @@
 #include "engine/load_clx.hpp"
 
+#include <cstddef>
 #include <cstdint>
-
-#include <SDL.h>
-
-#ifdef USE_SDL1
-#include "utils/sdl2_to_1_2_backports.h"
-#endif
+#include <expected>
 
 #include "appfat.h"
 #include "engine/assets.hpp"
@@ -29,17 +25,17 @@ OptionalOwnedClxSpriteListOrSheet LoadOptionalClxListOrSheet(const char *path)
 	return OwnedClxSpriteListOrSheet::FromBuffer(std::move(data), size);
 }
 
-tl::expected<OwnedClxSpriteListOrSheet, std::string> LoadClxListOrSheetWithStatus(const char *path)
+std::expected<OwnedClxSpriteListOrSheet, std::string> LoadClxListOrSheetWithStatus(const char *path)
 {
 	size_t size;
-	tl::expected<std::unique_ptr<uint8_t[]>, std::string> data = LoadFileInMemWithStatus<uint8_t>(path, &size);
-	if (!data.has_value()) return tl::make_unexpected(std::move(data).error());
+	std::expected<std::unique_ptr<uint8_t[]>, std::string> data = LoadFileInMemWithStatus<uint8_t>(path, &size);
+	if (!data.has_value()) return std::unexpected(std::move(data).error());
 	return OwnedClxSpriteListOrSheet::FromBuffer(std::move(data).value(), size);
 }
 
 OwnedClxSpriteListOrSheet LoadClxListOrSheet(const char *path)
 {
-	tl::expected<OwnedClxSpriteListOrSheet, std::string> result = LoadClxListOrSheetWithStatus(path);
+	std::expected<OwnedClxSpriteListOrSheet, std::string> result = LoadClxListOrSheetWithStatus(path);
 	if (!result.has_value()) app_fatal(result.error());
 	return std::move(result).value();
 }

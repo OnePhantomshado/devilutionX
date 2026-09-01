@@ -14,16 +14,15 @@
 #include <string>
 #include <tuple>
 
-#include <fmt/format.h>
-
 #include "config.h"
 #include "levels/gendung.h"
 #include "levels/setmaps.h"
-#include "lua/lua.hpp"
+#include "lua/lua_global.hpp"
 #include "multi.h"
 #include "panels/charpanel.hpp"
 #include "player.h"
-#include "playerdat.hpp"
+#include "tables/playerdat.hpp"
+#include "utils/format.hpp"
 #include "utils/language.h"
 #include "utils/str_cat.hpp"
 
@@ -94,14 +93,14 @@ std::string GetLocationString()
 		else if (tracked_data.dungeonArea == DTYPE_CRYPT)
 			level -= 20;
 
-		return fmt::format(fmt::runtime(_(/* TRANSLATORS: dungeon type and floor number i.e. "Cathedral 3"*/ "{} {}")), dungeonStr, level);
+		return FormatRuntime(_(/* TRANSLATORS: dungeon type and floor number i.e. "Cathedral 3"*/ "{} {}"), dungeonStr, level);
 	}
 	return dungeonStr;
 }
 
 std::string GetCharacterString()
 {
-	return fmt::format(fmt::runtime(_(/* TRANSLATORS: Discord character, i.e. "Lv 6 Warrior" */ "Lv {} {}")), tracked_data.playerLevel, MyPlayer->getClassName());
+	return FormatRuntime(_(/* TRANSLATORS: Discord character, i.e. "Lv 6 Warrior" */ "Lv {} {}"), tracked_data.playerLevel, MyPlayer->getClassName());
 }
 
 std::string GetDetailString()
@@ -113,7 +112,7 @@ std::string GetStateString()
 {
 	constexpr std::array<const char *, 3> DifficultyStrs = { N_("Normal"), N_("Nightmare"), N_("Hell") };
 	const std::string_view difficultyStr = _(DifficultyStrs[sgGameInitInfo.nDifficulty]);
-	return fmt::format(fmt::runtime(_(/* TRANSLATORS: Discord state i.e. "Nightmare difficulty" */ "{} difficulty")), difficultyStr);
+	return FormatRuntime(_(/* TRANSLATORS: Discord state i.e. "Nightmare difficulty" */ "{} difficulty"), difficultyStr);
 }
 
 std::string GetTooltipString()
@@ -124,7 +123,7 @@ std::string GetTooltipString()
 std::string GetPlayerAssetString()
 {
 	char chars[5] {
-		CharChar[static_cast<int>(MyPlayer->_pClass)],
+		GetPlayerSpriteDataForClass(MyPlayer->_pClass).classChar,
 		ArmourChar[tracked_data.playerGfx >> 4],
 		WepChar[tracked_data.playerGfx & 0xF],
 		'a',

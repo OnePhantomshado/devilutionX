@@ -9,7 +9,7 @@ namespace {
 TEST(DecodeFirstUtf8CodePointTest, OneByteCodePoint)
 {
 	size_t len;
-	char32_t cp = DecodeFirstUtf8CodePoint("a", &len);
+	const char32_t cp = DecodeFirstUtf8CodePoint("a", &len);
 	EXPECT_EQ(cp, U'a');
 	EXPECT_EQ(len, 1);
 }
@@ -17,7 +17,7 @@ TEST(DecodeFirstUtf8CodePointTest, OneByteCodePoint)
 TEST(DecodeFirstUtf8CodePointTest, TwoByteCodePoint)
 {
 	size_t len;
-	char32_t cp = DecodeFirstUtf8CodePoint("ж", &len);
+	const char32_t cp = DecodeFirstUtf8CodePoint("ж", &len);
 	EXPECT_EQ(cp, U'ж');
 	EXPECT_EQ(len, 2);
 }
@@ -25,7 +25,7 @@ TEST(DecodeFirstUtf8CodePointTest, TwoByteCodePoint)
 TEST(DecodeFirstUtf8CodePointTest, ThreeByteCodePoint)
 {
 	size_t len;
-	char32_t cp = DecodeFirstUtf8CodePoint("€", &len);
+	const char32_t cp = DecodeFirstUtf8CodePoint("€", &len);
 	EXPECT_EQ(cp, U'€');
 	EXPECT_EQ(len, 3);
 }
@@ -33,7 +33,7 @@ TEST(DecodeFirstUtf8CodePointTest, ThreeByteCodePoint)
 TEST(DecodeFirstUtf8CodePointTest, FourByteCodePoint)
 {
 	size_t len;
-	char32_t cp = DecodeFirstUtf8CodePoint("💡", &len);
+	const char32_t cp = DecodeFirstUtf8CodePoint("💡", &len);
 	EXPECT_EQ(cp, U'💡');
 	EXPECT_EQ(len, 4);
 }
@@ -41,7 +41,7 @@ TEST(DecodeFirstUtf8CodePointTest, FourByteCodePoint)
 TEST(DecodeFirstUtf8CodePointTest, InvalidCodePoint)
 {
 	size_t len;
-	char32_t cp = DecodeFirstUtf8CodePoint("\xc3\x28", &len);
+	const char32_t cp = DecodeFirstUtf8CodePoint("\xc3\x28", &len);
 	EXPECT_EQ(cp, Utf8DecodeError);
 	EXPECT_EQ(len, 1);
 }
@@ -119,6 +119,117 @@ TEST(Utf8CodeUnits, BasicLatin)
 		EXPECT_FALSE(IsBasicLatin(x)) << "Multibyte Utf8 code units are not Basic Latin symbols";
 	}
 	EXPECT_FALSE(IsBasicLatin('\xFF')) << "Multibyte Utf8 code units are not Basic Latin symbols";
+}
+
+TEST(Utf8CodePointIteratorTest, ForwardIteration)
+{
+	std::string_view s = "aж€💡";
+	Utf8CodePoints codepoints(s);
+	auto it = codepoints.begin();
+
+	EXPECT_NE(it, codepoints.end());
+	EXPECT_EQ(*it, U'a');
+	EXPECT_EQ(it.str(), "a");
+	EXPECT_EQ(it.size(), 1);
+
+	++it;
+	EXPECT_NE(it, codepoints.end());
+	EXPECT_EQ(*it, U'ж');
+	EXPECT_EQ(it.str(), "ж");
+	EXPECT_EQ(it.size(), 2);
+
+	++it;
+	EXPECT_NE(it, codepoints.end());
+	EXPECT_EQ(*it, U'€');
+	EXPECT_EQ(it.str(), "€");
+	EXPECT_EQ(it.size(), 3);
+
+	++it;
+	EXPECT_NE(it, codepoints.end());
+	EXPECT_EQ(*it, U'💡');
+	EXPECT_EQ(it.str(), "💡");
+	EXPECT_EQ(it.size(), 4);
+
+	++it;
+	EXPECT_EQ(it, codepoints.end());
+}
+
+TEST(Utf8CodePointIteratorTest, ReverseIteration)
+{
+	std::string_view s = "aж€💡";
+	Utf8CodePoints codepoints(s);
+	auto it = codepoints.rbegin();
+
+	EXPECT_NE(it, codepoints.rend());
+	EXPECT_EQ(*it, U'💡');
+	EXPECT_EQ(std::prev(it.base()).str(), "💡");
+	EXPECT_EQ(std::prev(it.base()).size(), 4);
+
+	++it;
+	EXPECT_NE(it, codepoints.rend());
+	EXPECT_EQ(*it, U'€');
+	EXPECT_EQ(std::prev(it.base()).str(), "€");
+	EXPECT_EQ(std::prev(it.base()).size(), 3);
+
+	++it;
+	EXPECT_NE(it, codepoints.rend());
+	EXPECT_EQ(*it, U'ж');
+	EXPECT_EQ(std::prev(it.base()).str(), "ж");
+	EXPECT_EQ(std::prev(it.base()).size(), 2);
+
+	++it;
+	EXPECT_NE(it, codepoints.rend());
+	EXPECT_EQ(*it, U'a');
+	EXPECT_EQ(std::prev(it.base()).str(), "a");
+	EXPECT_EQ(std::prev(it.base()).size(), 1);
+
+	++it;
+	EXPECT_EQ(it, codepoints.rend());
+}
+
+TEST(Utf8CodePointIteratorTest, BidirectionalDecrement)
+{
+	std::string_view s = "aж€💡";
+	Utf8CodePoints codepoints(s);
+	auto it = codepoints.end();
+
+	--it;
+	EXPECT_EQ(*it, U'💡');
+	EXPECT_EQ(it.str(), "💡");
+
+	--it;
+	EXPECT_EQ(*it, U'€');
+	EXPECT_EQ(it.str(), "€");
+
+	--it;
+	EXPECT_EQ(*it, U'ж');
+	EXPECT_EQ(it.str(), "ж");
+
+	--it;
+	EXPECT_EQ(*it, U'a');
+	EXPECT_EQ(it.str(), "a");
+
+	EXPECT_EQ(it, codepoints.begin());
+}
+
+TEST(Utf8CodePointIteratorTest, RangeBasedFor)
+{
+	std::string_view s = "aж€💡";
+	std::string result;
+	for (char32_t cp : Utf8CodePoints(s)) {
+		AppendUtf8(cp, result);
+	}
+	EXPECT_EQ(result, s);
+}
+
+TEST(Utf8CodePointIteratorTest, ReverseRangeBasedFor)
+{
+	std::string_view s = "aж€💡";
+	std::string result;
+	for (char32_t cp : Utf8ReverseCodePoints(s)) {
+		AppendUtf8(cp, result);
+	}
+	EXPECT_EQ(result, "💡€жa");
 }
 
 } // namespace

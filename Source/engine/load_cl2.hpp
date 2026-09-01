@@ -3,16 +3,15 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <expected>
 #include <string>
 
-#include <expected.hpp>
 #include <function_ref.hpp>
 
 #include "appfat.h"
 #include "engine/clx_sprite.hpp"
 #include "engine/load_file.hpp"
 #include "mpq/mpq_common.hpp"
-#include "utils/cl2_to_clx.hpp"
 #include "utils/endian_read.hpp"
 #include "utils/endian_write.hpp"
 #include "utils/pointer_value_union.hpp"
@@ -23,16 +22,18 @@
 #ifdef UNPACKED_MPQS
 #define DEVILUTIONX_CL2_EXT ".clx"
 #else
+#include "utils/cl2_to_clx.hpp"
+
 #define DEVILUTIONX_CL2_EXT ".cl2"
 #endif
 
 namespace devilution {
 
-tl::expected<OwnedClxSpriteListOrSheet, std::string> LoadCl2ListOrSheetWithStatus(const char *pszName, PointerOrValue<uint16_t> widthOrWidths);
+std::expected<OwnedClxSpriteListOrSheet, std::string> LoadCl2ListOrSheetWithStatus(const char *pszName, PointerOrValue<uint16_t> widthOrWidths);
 OwnedClxSpriteListOrSheet LoadCl2ListOrSheet(const char *pszName, PointerOrValue<uint16_t> widthOrWidths);
 
 template <size_t MaxCount>
-tl::expected<OwnedClxSpriteSheet, std::string> LoadMultipleCl2Sheet(tl::function_ref<const char *(size_t)> filenames, size_t count, uint16_t width)
+std::expected<OwnedClxSpriteSheet, std::string> LoadMultipleCl2Sheet(tl::function_ref<const char *(size_t)> filenames, size_t count, uint16_t width)
 {
 	StaticVector<std::array<char, MaxMpqPathSize>, MaxCount> paths;
 	StaticVector<AssetRef, MaxCount> files;
@@ -75,7 +76,7 @@ tl::expected<OwnedClxSpriteSheet, std::string> LoadMultipleCl2Sheet(tl::function
 #endif
 }
 
-inline tl::expected<OwnedClxSpriteList, std::string> LoadCl2WithStatus(const char *pszName, uint16_t width)
+inline std::expected<OwnedClxSpriteList, std::string> LoadCl2WithStatus(const char *pszName, uint16_t width)
 {
 	ASSIGN_OR_RETURN(OwnedClxSpriteListOrSheet result, LoadCl2ListOrSheetWithStatus(pszName, PointerOrValue<uint16_t> { width }));
 	return std::move(result).list();

@@ -2,11 +2,16 @@
 
 #include <string_view>
 
+#ifdef USE_SDL3
+#include <SDL3/SDL_log.h>
+#else
 #include <SDL.h>
-#include <fmt/core.h>
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#endif
 
+#include <format>
+#include <string>
+
+#include "utils/attributes.h"
 #include "utils/str_cat.hpp"
 
 #ifdef USE_SDL1
@@ -46,20 +51,18 @@ namespace detail {
 template <typename... Args>
 std::string format(std::string_view fmt, Args &&...args)
 {
-	FMT_TRY
-	{
-		return fmt::format(fmt::runtime(fmt), std::forward<Args>(args)...);
+#if DVL_EXCEPTIONS
+	try {
+		return std::vformat(fmt, std::make_format_args(args...));
+	} catch (const std::format_error &e) {
+		const std::string fullError = StrCat("Format error, fmt: ", fmt, " error: ", e.what());
+		SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION, "%s", fullError.c_str());
+		app_fatal(fullError);
 	}
-	FMT_CATCH(const fmt::format_error &e)
-	{
-#if FMT_EXCEPTIONS
-		// e.what() is undefined if exceptions are disabled, so we wrap the whole block
-		// with an `FMT_EXCEPTIONS` check.
-		std::string error = StrCat("Format error, fmt: ", fmt, " error: ", e.what());
-		SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION, "%s", error.c_str());
-		app_fatal(error);
+#else
+	// `std::vformat` terminates the program on error when exceptions are disabled.
+	return std::vformat(fmt, std::make_format_args(args...));
 #endif
-	}
 }
 
 } // namespace detail
@@ -81,10 +84,19 @@ inline void LogVerbose(LogCategory category, std::string_view str)
 	SDL_LogVerbose(static_cast<int>(category), "%.*s", static_cast<int>(str.size()), str.data());
 }
 
+inline bool IsLogLevel(LogCategory category, SDL_LogPriority priority)
+{
+#ifdef USE_SDL3
+	return SDL_GetLogPriority(static_cast<int>(category)) <= priority;
+#else
+	return SDL_LogGetPriority(static_cast<int>(category)) <= priority;
+#endif
+}
+
 template <typename... Args>
 void LogVerbose(LogCategory category, std::string_view fmt, Args &&...args)
 {
-	if (SDL_LogGetPriority(static_cast<int>(category)) > SDL_LOG_PRIORITY_VERBOSE) return;
+	if (!IsLogLevel(category, SDL_LOG_PRIORITY_VERBOSE)) return;
 	auto str = detail::format(fmt, std::forward<Args>(args)...);
 	SDL_LogVerbose(static_cast<int>(category), "%s", str.c_str());
 }
@@ -103,7 +115,7 @@ inline void LogDebug(LogCategory category, std::string_view str)
 template <typename... Args>
 void LogDebug(LogCategory category, std::string_view fmt, Args &&...args)
 {
-	if (SDL_LogGetPriority(static_cast<int>(category)) > SDL_LOG_PRIORITY_DEBUG) return;
+	if (!IsLogLevel(category, SDL_LOG_PRIORITY_DEBUG)) return;
 	auto str = detail::format(fmt, std::forward<Args>(args)...);
 	SDL_LogDebug(static_cast<int>(category), "%s", str.c_str());
 }

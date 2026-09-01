@@ -6,18 +6,28 @@
 #include "engine/sound.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <list>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 
+#ifdef USE_SDL3
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_timer.h>
+#include <SDL3_mixer/SDL_mixer.h>
+#else
 #include <Aulib/Stream.h>
 #include <SDL.h>
-#include <expected.hpp>
+#endif
 
+#include "appfat.h"
 #include "engine/assets.hpp"
+#include "game_mode.hpp"
 #include "options.h"
 #include "utils/log.hpp"
 #include "utils/math.h"
@@ -30,6 +40,11 @@
 namespace devilution {
 
 bool gbSndInited;
+
+#ifdef USE_SDL3
+MIX_Mixer *CurrentMixer;
+#endif
+
 /** The active background music track id. */
 _music_id sgnMusicTrack = NUM_MUSIC;
 
@@ -49,7 +64,7 @@ std::string GetMp3Path(const char *path)
 	return mp3Path;
 }
 
-tl::expected<void, std::string> LoadAudioFile(const char *path, bool stream, SoundSample &result)
+std::expected<void, std::string> LoadAudioFile(const char *path, bool stream, SoundSample &result)
 {
 	bool isMp3 = true;
 	std::string foundPath = GetMp3Path(path);
@@ -60,7 +75,7 @@ tl::expected<void, std::string> LoadAudioFile(const char *path, bool stream, Sou
 		isMp3 = false;
 	}
 	if (!ref.ok()) {
-		return tl::make_unexpected(StrCat("Audio file not found\n", path, "\n", SDL_GetError(), "\n" __FILE__ ":", __LINE__));
+		return std::unexpected(StrCat("Audio file not found\n", path, "\n", SDL_GetError(), "\n" __FILE__ ":", __LINE__));
 	}
 
 #ifdef STREAM_ALL_AUDIO_MIN_FILE_SIZE
@@ -77,7 +92,7 @@ tl::expected<void, std::string> LoadAudioFile(const char *path, bool stream, Sou
 
 	if (stream) {
 		if (result.SetChunkStream(foundPath, isMp3, /*logErrors=*/true) != 0) {
-			return tl::make_unexpected(StrCat("Failed to load audio file\n", foundPath, "\n", SDL_GetError(), "\n" __FILE__ ":", __LINE__));
+			return std::unexpected(StrCat("Failed to load audio file\n", foundPath, "\n", SDL_GetError(), "\n" __FILE__ ":", __LINE__));
 		}
 	} else {
 #if !defined(STREAM_ALL_AUDIO_MIN_FILE_SIZE) || STREAM_ALL_AUDIO_MIN_FILE_SIZE == 0
@@ -85,15 +100,15 @@ tl::expected<void, std::string> LoadAudioFile(const char *path, bool stream, Sou
 #endif
 		AssetHandle handle = OpenAsset(std::move(ref));
 		if (!handle.ok()) {
-			return tl::make_unexpected(StrCat("Failed to load audio file\n", foundPath, "\n", SDL_GetError(), "\n" __FILE__ ":", __LINE__));
+			return std::unexpected(StrCat("Failed to load audio file\n", foundPath, "\n", SDL_GetError(), "\n" __FILE__ ":", __LINE__));
 		}
 		auto waveFile = MakeArraySharedPtr<std::uint8_t>(size);
 		if (!handle.read(waveFile.get(), size)) {
-			return tl::make_unexpected(StrCat("Failed to read file\n", foundPath, ": ", SDL_GetError(), __FILE__ ":", __LINE__));
+			return std::unexpected(StrCat("Failed to read file\n", foundPath, ": ", SDL_GetError(), __FILE__ ":", __LINE__));
 		}
 		const int error = result.SetChunk(waveFile, size, isMp3);
 		if (error != 0) {
-			return tl::make_unexpected(SDL_GetError());
+			return std::unexpected(SDL_GetError());
 		}
 	}
 	return {};
@@ -115,10 +130,12 @@ SoundSample *DuplicateSound(const SoundSample &sound)
 		it = duplicateSounds.end();
 		--it;
 	}
+#ifndef USE_SDL3
 	result->SetFinishCallback([it]([[maybe_unused]] Aulib::Stream &stream) {
 		const std::lock_guard<SdlMutex> lock(*duplicateSoundsMutex);
 		duplicateSounds.erase(it);
 	});
+#endif
 	return result;
 }
 
@@ -152,7 +169,7 @@ int CapVolume(int volume)
 
 void OptionAudioChanged()
 {
-	effects_cleanup_sfx();
+	effects_cleanup_sfx(false);
 	music_stop();
 	snd_deinit();
 	snd_init();
@@ -174,17 +191,24 @@ const auto OptionChangeDevice = (GetOptions().Audio.device.SetValueChangedCallba
 
 void ClearDuplicateSounds()
 {
-	const std::lock_guard<SdlMutex> lock(*duplicateSoundsMutex);
-	duplicateSounds.clear();
+	// Move sound samples to a temporary list,
+	// avoiding a deadlock that involves SDL's
+	// mixer lock being taken by finalizers
+	std::list<std::unique_ptr<SoundSample>> drain;
+	{
+		const std::lock_guard<SdlMutex> lock(*duplicateSoundsMutex);
+		drain = std::move(duplicateSounds);
+		duplicateSounds.clear();
+	}
 }
 
-void snd_play_snd(TSnd *pSnd, int lVolume, int lPan)
+void snd_play_snd(TSnd *pSnd, int lVolume, int lPan, int userVolume)
 {
 	if (pSnd == nullptr || !gbSoundOn) {
 		return;
 	}
 
-	uint32_t tc = SDL_GetTicks();
+	const uint32_t tc = SDL_GetTicks();
 	if (tc - pSnd->start_tc < 80) {
 		return;
 	}
@@ -196,11 +220,11 @@ void snd_play_snd(TSnd *pSnd, int lVolume, int lPan)
 			return;
 	}
 
-	sound->PlayWithVolumeAndPan(lVolume, *GetOptions().Audio.soundVolume, lPan);
+	sound->PlayWithVolumeAndPan(lVolume, userVolume, lPan);
 	pSnd->start_tc = tc;
 }
 
-tl::expected<std::unique_ptr<TSnd>, std::string> SoundFileLoadWithStatus(const char *path, bool stream)
+std::expected<std::unique_ptr<TSnd>, std::string> SoundFileLoadWithStatus(const char *path, bool stream)
 {
 	auto snd = std::make_unique<TSnd>();
 	snd->start_tc = SDL_GetTicks() - 80 - 1;
@@ -212,7 +236,7 @@ tl::expected<std::unique_ptr<TSnd>, std::string> SoundFileLoadWithStatus(const c
 
 std::unique_ptr<TSnd> sound_file_load(const char *path, bool stream)
 {
-	tl::expected<std::unique_ptr<TSnd>, std::string> result = SoundFileLoadWithStatus(path, stream);
+	std::expected<std::unique_ptr<TSnd>, std::string> result = SoundFileLoadWithStatus(path, stream);
 	if (!result.has_value()) app_fatal(result.error());
 	return std::move(result).value();
 }
@@ -236,12 +260,31 @@ void snd_init()
 	// Initialize the SDL_audiolib library. Set the output sample rate to
 	// 22kHz, the audio format to 16-bit signed, use 2 output channels
 	// (stereo), and a 2KiB output buffer.
+#ifdef USE_SDL3
+	if (!MIX_Init()) {
+		LogError(LogCategory::Audio, "Failed to initialize SDL_mixer: {}", SDL_GetError());
+		return;
+	}
+	const AudioOptions &audioOptions = GetOptions().Audio;
+	SDL_AudioSpec specHint = {};
+	specHint.format = SDL_AUDIO_S16LE;
+	specHint.channels = *audioOptions.channels;
+	specHint.freq = static_cast<int>(*audioOptions.sampleRate);
+	CurrentMixer = MIX_CreateMixerDevice(audioOptions.device.id(), &specHint);
+	if (CurrentMixer == nullptr) {
+		LogError(LogCategory::Audio, "Failed to create mixer device: {}", SDL_GetError());
+		SDL_ClearError();
+		MIX_Quit();
+		return;
+	}
+#else
 	if (!Aulib::init(*GetOptions().Audio.sampleRate, AUDIO_S16, *GetOptions().Audio.channels, *GetOptions().Audio.bufferSize, *GetOptions().Audio.device)) {
 		LogError(LogCategory::Audio, "Failed to initialize audio (Aulib::init): {}", SDL_GetError());
 		return;
 	}
 	LogVerbose(LogCategory::Audio, "Aulib sampleRate={} channels={} frameSize={} format={:#x}",
 	    Aulib::sampleRate(), Aulib::channelCount(), Aulib::frameSize(), Aulib::sampleFormat());
+#endif
 
 	duplicateSoundsMutex.emplace();
 	gbSndInited = true;
@@ -250,7 +293,14 @@ void snd_init()
 void snd_deinit()
 {
 	if (gbSndInited) {
+		ClearDuplicateSounds();
+#ifdef USE_SDL3
+		MIX_DestroyMixer(CurrentMixer);
+		CurrentMixer = nullptr;
+		MIX_Quit();
+#else
 		Aulib::quit();
+#endif
 		duplicateSoundsMutex = std::nullopt;
 	}
 
@@ -309,8 +359,6 @@ void music_start(_music_id nTrack)
 	}
 
 	music.SetVolume(*GetOptions().Audio.musicVolume, VOLUME_MIN, VOLUME_MAX);
-	if (!diablo_is_focused())
-		music_mute();
 	if (!music.Play(/*numIterations=*/0)) {
 		LogError(LogCategory::Audio, "Aulib::Stream::play (from music_start): {}", SDL_GetError());
 		music_stop();
@@ -350,6 +398,16 @@ int sound_get_or_set_sound_volume(int volume)
 	GetOptions().Audio.soundVolume.SetValue(volume);
 
 	return *GetOptions().Audio.soundVolume;
+}
+
+int SoundGetOrSetAudioCuesVolume(int volume)
+{
+	if (volume == 1)
+		return *GetOptions().Audio.audioCuesVolume;
+
+	GetOptions().Audio.audioCuesVolume.SetValue(volume);
+
+	return *GetOptions().Audio.audioCuesVolume;
 }
 
 void music_mute()

@@ -1,6 +1,9 @@
 // Stubbed implementations of effects for the NOSOUND mode.
 #include "effects.h"
 
+#include <expected>
+#include <magic_enum/magic_enum.hpp>
+
 #include "engine/random.hpp"
 
 namespace devilution {
@@ -41,10 +44,18 @@ void PlaySfxLoc(SfxID psfx, Point position, bool randomizeByCategory)
 }
 void sound_stop() { }
 void sound_update() { }
-void effects_cleanup_sfx() { }
+void effects_cleanup_sfx(bool fullUnload) { }
 void sound_init() { }
 void ui_sound_init() { }
 void effects_play_sound(SfxID id) { }
 int GetSFXLength(SfxID nSFX) { return 0; }
 
+std::expected<HeroSpeech, std::string> ParseHeroSpeech(std::string_view value)
+{
+	const std::optional<HeroSpeech> enumValueOpt = magic_enum::enum_cast<HeroSpeech>(value);
+	if (enumValueOpt.has_value()) {
+		return enumValueOpt.value();
+	}
+	return std::unexpected("Unknown enum value.");
+}
 } // namespace devilution

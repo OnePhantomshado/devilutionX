@@ -10,12 +10,13 @@
 
 #include "DiabloUI/ui_flags.hpp"
 #include "cursor.h"
+#include "cursor_defs.hpp"
 #include "engine/animationinfo.h"
 #include "engine/point.hpp"
 #include "engine/surface.hpp"
-#include "itemdat.h"
 #include "levels/dun_tile.hpp"
 #include "monster.h"
+#include "tables/itemdat.h"
 #include "utils/is_of.hpp"
 #include "utils/string_or_view.hpp"
 
@@ -43,7 +44,7 @@ enum item_quality : uint8_t {
 	ITEM_QUALITY_UNIQUE,
 };
 
-enum _unique_items : int8_t {
+enum _unique_items : int32_t {
 	UITEM_CLEAVER,
 	UITEM_SKCROWN,
 	UITEM_INFRARING,
@@ -500,7 +501,7 @@ void InitItems();
 void CalcPlrItemVals(Player &player, bool Loadgfx);
 void CalcPlrInv(Player &player, bool Loadgfx);
 void InitializeItem(Item &item, _item_indexes itemData);
-void GenerateNewSeed(Item &h);
+void GenerateNewSeed(Item &item);
 int GetGoldCursor(int value);
 
 /**
@@ -557,6 +558,7 @@ void UseItem(Player &player, item_misc_id Mid, SpellID spellID, int spellFrom);
 bool UseItemOpensHive(const Item &item, Point position);
 bool UseItemOpensGrave(const Item &item, Point position);
 void SpawnSmith(int lvl);
+void ReplacePremium(const Player &player, int idx);
 void SpawnPremium(const Player &player);
 void SpawnWitch(int lvl);
 void SpawnBoy(int lvl);

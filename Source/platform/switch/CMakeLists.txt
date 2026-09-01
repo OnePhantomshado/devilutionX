@@ -22,4 +22,6 @@ endif()
 
 target_link_libraries(libdevilutionx_switch PUBLIC
   DevilutionX::SDL
+  libdevilutionx_log
+  libdevilutionx_text_input
 )

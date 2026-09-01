@@ -6,16 +6,23 @@
 
 #include <config.h>
 
+#ifdef USE_SDL3
+#include <SDL3/SDL_thread.h>
+#include <SDL3/SDL_timer.h>
+#else
 #include <SDL.h>
-#include <fmt/format.h>
 
 #ifdef USE_SDL1
 #include "utils/sdl2_to_1_2_backports.h"
 #endif
+#include "utils/sdl_compat.h"
+#endif
 
 #include "diablo.h"
+#include "dvlnet/leaveinfo.hpp"
 #include "multi.h"
 #include "storm/storm_net.hpp"
+#include "utils/format.hpp"
 #include "utils/language.h"
 #include "utils/sdl_thread.h"
 #include "utils/str_cat.hpp"
@@ -27,8 +34,9 @@ namespace {
 
 /** Set to true when a fatal error is encountered and the application should shut down. */
 bool Terminating = false;
+
 /** Thread id of the last callee to FreeDlg(). */
-SDL_threadID CleanupThreadId;
+SDL_ThreadID CleanupThreadId;
 
 /**
  * @brief Cleans up after a fatal application error.
@@ -42,7 +50,7 @@ void FreeDlg()
 	CleanupThreadId = this_sdl_thread::get_id();
 
 	if (gbIsMultiplayer) {
-		if (SNetLeaveGame(3))
+		if (SNetLeaveGame(leaveinfo_t::LEAVE_EXIT))
 			SDL_Delay(2000);
 	}
 
@@ -74,16 +82,16 @@ void ErrDlg(const char *title, std::string_view error, std::string_view logFileP
 {
 	DisplayFatalErrorAndExit(
 	    title,
-	    fmt::format(fmt::runtime(_(/* TRANSLATORS: Error message that displays relevant information for bug report */ "{:s}\n\nThe error occurred at: {:s} line {:d}")),
+	    FormatRuntime(_(/* TRANSLATORS: Error message that displays relevant information for bug report */ "{:s}\n\nThe error occurred at: {:s} line {:d}"),
 	        error, logFilePath, logLineNr));
 }
 
 void InsertCDDlg(std::string_view archiveName)
 {
 	DisplayFatalErrorAndExit(_("Data File Error"),
-	    fmt::format(fmt::runtime(_("Unable to open main data archive ({:s}).\n"
-	                               "\n"
-	                               "Make sure that it is in the game folder.")),
+	    FormatRuntime(_("Unable to open main data archive ({:s}).\n"
+	                    "\n"
+	                    "Make sure that it is in the game folder."),
 	        archiveName));
 }
 
@@ -91,7 +99,7 @@ void DirErrorDlg(std::string_view error)
 {
 	DisplayFatalErrorAndExit(
 	    _("Read-Only Directory Error"),
-	    fmt::format(fmt::runtime(_(/* TRANSLATORS: Error when Program is not allowed to write data */ "Unable to write to location:\n{:s}")),
+	    FormatRuntime(_(/* TRANSLATORS: Error when Program is not allowed to write data */ "Unable to write to location:\n{:s}"),
 	        error));
 }
 

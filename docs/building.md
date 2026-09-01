@@ -12,7 +12,7 @@ Note that ```pkg-config``` is an optional dependency for finding libsodium, alth
 ### Installing dependencies on Debian and Ubuntu
 
 ```
-sudo apt-get install cmake g++ libsdl2-dev libsodium-dev libpng-dev libbz2-dev libgtest-dev libgmock-dev libbenchmark-dev libsdl2-image-dev libfmt-dev
+sudo apt-get install cmake g++ libsdl2-dev libsodium-dev libpng-dev libbz2-dev libgtest-dev libgmock-dev libbenchmark-dev libsdl2-image-dev
 ```
 
 ### If you want to build the translations (optional)
@@ -30,7 +30,7 @@ sudo apt-get install smpq
 ### Installing dependencies on Fedora
 
 ```
-sudo dnf install cmake gcc-c++ glibc-devel libstdc++-static SDL2-devel SDL2_image-devel libsodium-devel libpng-devel bzip2-devel gmock-devel gtest-devel google-benchmark-devel libasan libubsan fmt-devel
+sudo dnf install cmake gcc-c++ glibc-devel libstdc++-static SDL2-devel SDL2_image-devel libsodium-devel libpng-devel bzip2-devel gmock-devel gtest-devel google-benchmark-devel libasan libubsan libpfm-devel
 ```
 
 ### Compiling
@@ -54,7 +54,6 @@ Then, build DevilutionX using the cross-compilation CMake toolchain file:
 cmake -S. -Bbuild-aarch64-rel \
   -DCMAKE_TOOLCHAIN_FILE=../CMake/platforms/aarch64-linux-gnu.toolchain.cmake \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCPACK=ON \
-  -DDEVILUTIONX_SYSTEM_LIBFMT=OFF
 cmake --build build-aarch64-rel -j $(getconf _NPROCESSORS_ONLN) --target package
 ```
 
@@ -167,56 +166,46 @@ You can launch WSL anytime by typing wsl or ubuntu in a Command Prompt or Powers
 In a WSL terminal run these commands to get the source code for DevilutionX
 
 ```
-sudo apt install git
+sudo apt-get install git
 git clone https://github.com/diasurgical/devilutionx
 cd devilutionx
 ```
+
 </details>
 
 ### Installing dependencies on WSL, Debian and Ubuntu
 
-### 32-bit
-
-In addition to the 32-bit MinGW build tools, the build process depends on the 32-bit MinGW Development Libraries for [SDL2](https://www.libsdl.org/download-2.0.php) and [libsodium](https://github.com/jedisct1/libsodium/releases) as well as headers for [zlib](https://zlib.net/zlib-1.2.12.tar.gz). These dependencies will need to be placed in the appropriate subfolders under `/usr/i686-w64-mingw32`. This can be done automatically by running [`Packaging/windows/mingw-prep.sh`](/Packaging/windows/mingw-prep.sh).
+#### MinGW build tools
 
 ```bash
-# Install the 32-bit MinGW build tools
-sudo apt install cmake gcc-mingw-w64-i686 g++-mingw-w64-i686 pkg-config-mingw-w64-i686 libz-mingw-w64-dev git wget
+# Install MinGW build tools
+sudo apt-get update
+sudo apt-get install cmake git libz-mingw-w64-dev mingw-w64 mingw-w64-tools smpq wget
+```
 
+<details><summary>MinGW 32-bit</summary>
+
+The 32-bit build depends on the 32-bit MinGW Development Libraries for [SDL2](https://www.libsdl.org/download-2.0.php) and [libsodium](https://github.com/jedisct1/libsodium/releases) as well as headers for [zlib](https://zlib.net/zlib-1.2.12.tar.gz). These dependencies will need to be placed in the appropriate subfolders under `/usr/i686-w64-mingw32`.
+
+When linking zlib, libpng will always prefer dynamically linking with `libz.dll.a` if it can be found. We recommend renaming or deleting `libz.dll.a` to force libpng to use static linkage. This will prevent errors about missing dlls when you attempt to run the game.
+
+These can be done automatically by running [`Packaging/windows/mingw-prep.sh`](/Packaging/windows/mingw-prep.sh).
+
+Note: If your `i686-w64-mingw32` directory is not in `/usr` (e.g. when on
+Debian), the mingw-prep scripts and the CMake command won't work. You need
+adjust the mingw-prep scripts and pass `-DCROSS_PREFIX=/path` to CMake to set
+the path to the parent of the `i686-w64-mingw32` directory.
+
+```bash
 # Download the 32-bit development libraries for SDL2 and libsodium
 # as well as the headers for zlib and place them in subfolders under
 # /usr/i686-w64-mingw32
 Packaging/windows/mingw-prep.sh
 ```
 
-### 64-bit
-
-In addition to the 64-bit MinGW build tools, the build process depends on the 64-bit MinGW Development Libraries of [SDL2](https://www.libsdl.org/download-2.0.php) and [libsodium](https://github.com/jedisct1/libsodium/releases) as well as headers for [zlib](https://zlib.net/zlib-1.2.12.tar.gz). These dependencies will need to be placed in the appropriate subfolders under `/usr/x86_64-w64-mingw32`. This can be done automatically by running [`Packaging/windows/mingw-prep64.sh`](/Packaging/windows/mingw-prep64.sh).
-
-```bash
-# Install the 64-bit MinGW build tools
-sudo apt install cmake gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 pkg-config-mingw-w64-x86-64 libz-mingw-w64-dev git wget
-
-# Download the 64-bit development libraries for SDL2 and libsodium
-# as well as the headers for zlib and place them in subfolders under
-# /usr/x86_64-w64-mingw32
-Packaging/windows/mingw-prep64.sh
-```
-
-### Before compiling
-
-When linking zlib, libpng will always prefer dynamically linking with `libz.dll.a` if it can be found. We recommend renaming or deleting `libz.dll.a` to force libpng to use static linkage. This will prevent errors about missing dlls when you attempt to run the game.
-
-```bash
-sudo mv /usr/i686-w64-mingw32/lib/libz.dll.a /usr/i686-w64-mingw32/lib/libz.dll.a.bak
-sudo mv /usr/x86_64-w64-mingw32/lib/libz.dll.a /usr/x86_64-w64-mingw32/lib/libz.dll.a.bak
-```
-
 ### Compiling
 
 By compiling the `package` target, the build will produce the `devilutionx.zip` archive which should contain all the dlls necessary to run the game. If you encounter any errors suggesting a dll is missing, try extracting the dlls from the zip archive.
-
-### 32-bit
 
 ```bash
 # Configure the project to disable unit tests,
@@ -224,14 +213,36 @@ By compiling the `package` target, the build will produce the `devilutionx.zip` 
 # and enable Discord integration
 cmake -S. -Bbuild -DCMAKE_TOOLCHAIN_FILE=../CMake/platforms/mingwcc.toolchain.cmake \
     -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DDEVILUTIONX_SYSTEM_BZIP2=OFF \
-    -DDEVILUTIONX_STATIC_LIBSODIUM=ON -DDISCORD_INTEGRATION=ON
+    -DDEVILUTIONX_STATIC_LIBSODIUM=ON -DDISCORD_INTEGRATION=ON -DCPACK=ON
 
 # Build the "package" target which produces devilutionx.zip
 # containing all the necessary dlls to run the game
 cmake --build build -j $(getconf _NPROCESSORS_ONLN) --target package
 ```
 
-### 64-bit
+</details>
+
+<details open><summary>MinGW 64-bit</summary>
+
+The 64-bit build depends on the 64-bit MinGW Development Libraries of [SDL2](https://www.libsdl.org/download-2.0.php) and [libsodium](https://github.com/jedisct1/libsodium/releases) as well as headers for [zlib](https://zlib.net/zlib-1.2.12.tar.gz). These dependencies will need to be placed in the appropriate subfolders under `/usr/x86_64-w64-mingw32`.
+
+When linking zlib, libpng will always prefer dynamically linking with `libz.dll.a` if it can be found. We recommend renaming or deleting `libz.dll.a` to force libpng to use static linkage. This will prevent errors about missing dlls when you attempt to run the game.
+
+These can be done automatically by running [`Packaging/windows/mingw-prep64.sh`](/Packaging/windows/mingw-prep64.sh).
+
+Note: If your `x86_64-w64-mingw32` directory is not in `/usr` (e.g. when
+on Debian), the mingw-prep scripts and the CMake command won't work. You need
+adjust the mingw-prep scripts and pass `-DCROSS_PREFIX=/path` to CMake to set
+the path to the parent of the `x86_64-w64-mingw32` directory.
+
+```bash
+# Download the 64-bit development libraries for SDL2 and libsodium
+# as well as the headers for zlib and place them in subfolders under
+# /usr/x86_64-w64-mingw32
+Packaging/windows/mingw-prep64.sh
+```
+
+### Compiling
 
 ```bash
 # Configure the project to disable unit tests,
@@ -239,17 +250,17 @@ cmake --build build -j $(getconf _NPROCESSORS_ONLN) --target package
 # and enable Discord integration
 cmake -S. -Bbuild -DCMAKE_TOOLCHAIN_FILE=../CMake/platforms/mingwcc64.toolchain.cmake \
     -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DDEVILUTIONX_SYSTEM_BZIP2=OFF \
-    -DDEVILUTIONX_STATIC_LIBSODIUM=ON -DDISCORD_INTEGRATION=ON
+    -DDEVILUTIONX_STATIC_LIBSODIUM=ON -DDISCORD_INTEGRATION=ON -DCPACK=ON
 
 # Build the "package" target which produces devilutionx.zip
 # containing all the necessary dlls to run the game
 cmake --build build -j $(getconf _NPROCESSORS_ONLN) --target package
 ```
 
-Note: If your `(i686|x86_64)-w64-mingw32` directory is not in `/usr` (e.g. when on Debian), the mingw-prep scripts and the CMake
-command won't work. You need adjust the mingw-prep scripts and pass `-DCROSS_PREFIX=/path` to CMake to set the path to the parent
-of the `(i686|x86_64)-w64-mingw32` directory.
 </details>
+
+</details>
+
 <details><summary>Windows via Visual Studio</summary>
 
 ### Installing dependencies
@@ -272,7 +283,7 @@ If you need additional instructions for vcpkg you can find the documentation [he
 
 ### If you want to build the devilutionX.mpq File (optional)
 
-In order to build devilutionx.mpq, install smpq from https://launchpad.net/smpq/trunk/1.6/+download/SMPQ-1.6-x86_64.exe.
+In order to build devilutionx.mpq, install smpq from https://launchpad.net/smpq/trunk/1.7/+download/SMPQ-1.7-x86_64.exe.
 The location of this tool will need to be [added to the system's PATH environment variable](https://www.architectryan.com/2018/03/17/add-to-the-path-on-windows-10/).
 
 ### Compiling
@@ -315,6 +326,28 @@ Click "Open Existing Project" and choose "android-project" folder in DevilutionX
 Wait until Gradle sync is completed.
 In Android Studio, go to "Build -> Make Project" or use the shortcut Ctrl+F9
 You can find the compiled APK in `/android-project/app/build/outputs/apk/`
+</details>
+
+<details><summary>Android Termux</summary>
+
+### Installing dependencies on Debian and Ubuntu
+
+```
+pkg i which getconf cmake gettext libsodium sdl2 sdl2-image zlib bzip2
+```
+
+### If you want to build the devilutionX.mpq File (optional)
+
+```
+NOSUDO=1 tools/build_and_install_smpq.sh
+```
+
+### Compiling
+
+```bash
+cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release -DDEVILUTIONX_SYSTEM_BENCHMARK=OFF
+cmake --build build -j $(nproc)
+```
 </details>
 
 <details><summary>Nintendo Switch</summary>
@@ -534,14 +567,13 @@ emrun index.html
 
 ### Dependencies
 
-* Windows 10
+* Windows 10+
 * CMake
 * Git
-* Visual Studio 2022 with the following packages installed:
-    * C++ (v143) Universal Windows Platform tools
-    * Windows 11 SDK (10.0.22000.0)
-    * Windows 10 SDK (10.0.18362.0)
-    * MSVC v143 - VS 2022 C++ x64/x86 build tools
+* Visual Studio 2026 with the following packages installed:
+    * C++ (v145) Universal Windows Platform tools
+    * Windows 11 SDK (10.0.26100.0)
+    * MSVC v145 - VS 2026 C++ x64/x86 build tools
 
 _Note: Visual Studio Community Edition can be used._
 
@@ -589,8 +621,7 @@ sudo port install curl curl-ca-bundle gcc14 cmake \
 sudo port select --set gcc mp-gcc14
 ~~~
 
-<!-- The following packages have issues so we use the vendored versions:
-     libfmt11 google-benchmark gtest -->
+<!-- The following packages have issues so we use the vendored versions: google-benchmark gtest -->
 
 Then, build DevilutionX:
 
@@ -609,6 +640,56 @@ sudo port install python312
 sudo port select --set python python312
 sudo port select --set python3 python312
 ~~~
+
+</details>
+
+<details><summary>DOS</summary>
+
+Cross-compile for DOS from Linux using DJGPP GCC 14.2.0. The build uses SDL3-dos
+(a DOS port of SDL3) with VESA video and Sound Blaster 16 audio.
+
+#### Installing the DJGPP toolchain (once)
+
+~~~ bash
+Packaging/windows/dos-prep.sh
+~~~
+
+This builds and installs the DJGPP cross-compiler. After installation, make sure
+`i586-pc-msdosdjgpp-gcc` (or `i386-pc-msdosdjgpp-gcc`) is on your `PATH`.
+
+#### Compiling
+
+~~~ bash
+cmake -S. -Bbuild-dos \
+  -DCMAKE_TOOLCHAIN_FILE=CMake/platforms/djcpp.toolchain.cmake \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_TESTING=OFF
+cmake --build build-dos -j $(getconf _NPROCESSORS_ONLN)
+~~~
+
+Output: `build-dos/devx.exe` (≈ 5 MB DJGPP executable).
+
+#### Running in DOSBox
+
+1. Copy the CWSDPMI DPMI host next to the executable:
+   ~~~ bash
+   cp /path/to/CWSDPMI.EXE build-dos/
+   ~~~
+
+2. Place `spawn.mpq` (shareware) or `DIABDAT.MPQ` (full game) in `build-dos/`.
+
+3. Run:
+   ~~~ bash
+   dosbox -c "MOUNT C build-dos" -c "C:" -c "devx.exe"
+   ~~~
+
+Useful flags:
+- `devx.exe --verbose --log-to-file DEBUG.LOG` to write verbose log to a file
+
+#### Known limitations
+
+- **MP3 too slow for real-time:** dr_mp3 compiles but real-time stream-decoding
+  drops the game to ~4.5 fps. Use WAV-only MPQ files on DOS.
 
 </details>
 

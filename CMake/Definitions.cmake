@@ -22,6 +22,7 @@ foreach(
   UNPACKED_MPQS
   UNPACKED_SAVES
   DEVILUTIONX_WINDOWS_NO_WCHAR
+  TERMUX
 )
   if(${def_name})
     list(APPEND DEVILUTIONX_DEFINITIONS ${def_name})
@@ -93,12 +94,23 @@ foreach(
   REMAP_KEYBOARD_KEYS
   DEVILUTIONX_DEFAULT_RESAMPLER
   STREAM_ALL_AUDIO_MIN_FILE_SIZE
-  DEVILUTIONX_DISPLAY_TEXTURE_FORMAT
+  DEVILUTIONX_DISPLAY_PIXELFORMAT # SDL2-only
+  DEVILUTIONX_DISPLAY_TEXTURE_FORMAT # SDL2-only
   DEVILUTIONX_SCREENSHOT_FORMAT
   DARWIN_MAJOR_VERSION
   DARWIN_MINOR_VERSION
 )
   if(DEFINED ${def_name} AND NOT ${def_name} STREQUAL "")
     list(APPEND DEVILUTIONX_DEFINITIONS ${def_name}=${${def_name}})
+  endif()
+endforeach(def_name)
+
+# Defines with string value
+foreach(
+  def_name
+  CMAKE_INSTALL_PREFIX
+)
+  if(DEFINED ${def_name} AND NOT ${def_name} STREQUAL "")
+    list(APPEND DEVILUTIONX_DEFINITIONS "${def_name}=\"${${def_name}}\"")
   endif()
 endforeach(def_name)

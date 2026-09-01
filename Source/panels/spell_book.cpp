@@ -1,13 +1,11 @@
 #include "panels/spell_book.hpp"
 
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <string>
 
-#include <expected.hpp>
-#include <fmt/format.h>
-
-#include "control.h"
+#include "control/control.hpp"
 #include "engine/backbuffer_state.hpp"
 #include "engine/clx_sprite.hpp"
 #include "engine/load_cel.hpp"
@@ -20,7 +18,8 @@
 #include "panels/spell_icons.hpp"
 #include "panels/ui_panels.hpp"
 #include "player.h"
-#include "spelldat.h"
+#include "tables/spelldat.h"
+#include "utils/format.hpp"
 #include "utils/language.h"
 #include "utils/status_macros.hpp"
 
@@ -74,7 +73,7 @@ void PrintSBookStr(const Surface &out, Point position, std::string_view text, Ui
 
 SpellType GetSBookTrans(SpellID ii, bool townok)
 {
-	Player &player = *InspectPlayer;
+	const Player &player = *InspectPlayer;
 	if (ii == GetPlayerStartingLoadoutForClass(player._pClass).skill)
 		return SpellType::Skill;
 	SpellType st = SpellType::Spell;
@@ -112,14 +111,14 @@ StringOrView GetSpellPowerText(SpellID spell, int spellLevel)
 		return StringOrView {};
 	}
 	if (spell == SpellID::Healing || spell == SpellID::HealOther) {
-		return fmt::format(fmt::runtime(_(/* TRANSLATORS: UI constraints, keep short please.*/ "Heals: {:d} - {:d}")), min, max);
+		return FormatRuntime(_(/* TRANSLATORS: UI constraints, keep short please.*/ "Heals: {:d} - {:d}"), min, max);
 	}
-	return fmt::format(fmt::runtime(_(/* TRANSLATORS: UI constraints, keep short please.*/ "Damage: {:d} - {:d}")), min, max);
+	return FormatRuntime(_(/* TRANSLATORS: UI constraints, keep short please.*/ "Damage: {:d} - {:d}"), min, max);
 }
 
 } // namespace
 
-tl::expected<void, std::string> InitSpellBook()
+std::expected<void, std::string> InitSpellBook()
 {
 	ASSIGN_OR_RETURN(spellBookBackground, LoadCelWithStatus("data\\spellbk", static_cast<uint16_t>(SidePanelSize.width)));
 	ASSIGN_OR_RETURN(spellBookButtons, LoadCelWithStatus("data\\spellbkb", SpellBookButtonWidth()));
@@ -140,22 +139,22 @@ void DrawSpellBook(const Surface &out)
 	ClxDraw(out, GetPanelPosition(UiPanels::Spell, { 0, 351 }), (*spellBookBackground)[0]);
 	const int buttonX = gbIsHellfire && SpellbookTab < 5
 	    ? SpellBookButtonWidthHellfire * SpellbookTab
-	    : SpellBookButtonWidthDiablo * SpellbookTab
+	    : (SpellBookButtonWidthDiablo * SpellbookTab)
 	        // BUGFIX: rendering of page 3 and page 4 buttons are both off-by-one pixel (fixed).
 	        + (SpellbookTab == 2 || SpellbookTab == 3 ? 1 : 0);
 
 	ClxDraw(out, GetPanelPosition(UiPanels::Spell, { SpellBookButtonX + buttonX, SpellBookButtonY }), (*spellBookButtons)[SpellbookTab]);
-	Player &player = *InspectPlayer;
-	uint64_t spl = player._pMemSpells | player._pISpells | player._pAblSpells;
+	const Player &player = *InspectPlayer;
+	const uint64_t spl = player._pMemSpells | player._pISpells | player._pAblSpells;
 
 	const int lineHeight = 18;
 
 	int yp = 12;
 	const int textPaddingTop = 7;
 	for (size_t pageEntry = 0; pageEntry < SpellBookPageEntries; pageEntry++) {
-		SpellID sn = GetSpellFromSpellPage(SpellbookTab, pageEntry);
+		const SpellID sn = GetSpellFromSpellPage(SpellbookTab, pageEntry);
 		if (IsValidSpell(sn) && (spl & GetSpellBitmask(sn)) != 0) {
-			SpellType st = GetSBookTrans(sn, true);
+			const SpellType st = GetSBookTrans(sn, true);
 			SetSpellTrans(st);
 			const Point spellCellPosition = GetPanelPosition(UiPanels::Spell, { 11, yp + SpellBookDescription.height });
 			DrawSmallSpellIcon(out, spellCellPosition, sn);
@@ -173,16 +172,16 @@ void DrawSpellBook(const Surface &out)
 				break;
 			case SpellType::Charges: {
 				const int charges = player.InvBody[INVLOC_HAND_LEFT]._iCharges;
-				PrintSBookStr(out, line1, fmt::format(fmt::runtime(ngettext("Staff ({:d} charge)", "Staff ({:d} charges)", charges)), charges));
+				PrintSBookStr(out, line1, FormatRuntime(ngettext("Staff ({:d} charge)", "Staff ({:d} charges)", charges), charges));
 			} break;
 			default: {
 				const int mana = GetManaAmount(player, sn) >> 6;
 				const int lvl = player.GetSpellLevel(sn);
-				PrintSBookStr(out, line0, fmt::format(fmt::runtime(pgettext(/* TRANSLATORS: UI constraints, keep short please.*/ "spellbook", "Level {:d}")), lvl), UiFlags::AlignRight);
+				PrintSBookStr(out, line0, FormatRuntime(pgettext(/* TRANSLATORS: UI constraints, keep short please.*/ "spellbook", "Level {:d}"), lvl), UiFlags::AlignRight);
 				if (const StringOrView text = GetSpellPowerText(sn, lvl); !text.empty()) {
 					PrintSBookStr(out, line1, text, UiFlags::AlignRight);
 				}
-				PrintSBookStr(out, line1, fmt::format(fmt::runtime(pgettext(/* TRANSLATORS: UI constraints, keep short please.*/ "spellbook", "Mana: {:d}")), mana));
+				PrintSBookStr(out, line1, FormatRuntime(pgettext(/* TRANSLATORS: UI constraints, keep short please.*/ "spellbook", "Mana: {:d}"), mana));
 			} break;
 			}
 		}
@@ -196,11 +195,11 @@ void CheckSBook()
 	// Spell icons/buttons are 37x38 pixels, laid out from 11,18 with a 5 pixel margin between each icon. This is close
 	// enough to the height of the space given to spell descriptions that we can reuse that value and subtract the
 	// padding from the end of the area.
-	Rectangle iconArea = { GetPanelPosition(UiPanels::Spell, { 11, 18 }), Size { 37, SpellBookDescription.height * 7 - 5 } };
+	const Rectangle iconArea = { GetPanelPosition(UiPanels::Spell, { 11, 18 }), Size { 37, (SpellBookDescription.height * 7) - 5 } };
 	if (iconArea.contains(MousePosition) && !IsInspectingPlayer()) {
-		SpellID sn = GetSpellFromSpellPage(SpellbookTab, (MousePosition.y - iconArea.position.y) / SpellBookDescription.height);
+		const SpellID sn = GetSpellFromSpellPage(SpellbookTab, (MousePosition.y - iconArea.position.y) / SpellBookDescription.height);
 		Player &player = *InspectPlayer;
-		uint64_t spl = player._pMemSpells | player._pISpells | player._pAblSpells;
+		const uint64_t spl = player._pMemSpells | player._pISpells | player._pAblSpells;
 		if (IsValidSpell(sn) && (spl & GetSpellBitmask(sn)) != 0) {
 			SpellType st = SpellType::Spell;
 			if ((player._pISpells & GetSpellBitmask(sn)) != 0) {
@@ -221,7 +220,7 @@ void CheckSBook()
 	// instead justifies the buttons and puts the gap between buttons 2/3. See DrawSpellBook
 	const int buttonWidth = SpellBookButtonWidth();
 	// Tabs are drawn in a row near the bottom of the panel
-	Rectangle tabArea = { GetPanelPosition(UiPanels::Spell, { 7, 320 }), Size { 305, 29 } };
+	const Rectangle tabArea = { GetPanelPosition(UiPanels::Spell, { 7, 320 }), Size { 305, 29 } };
 	if (tabArea.contains(MousePosition)) {
 		int hitColumn = MousePosition.x - tabArea.position.x;
 		// Clicking on the gutter currently activates tab 3. Could make it do nothing by checking for == here and return early.

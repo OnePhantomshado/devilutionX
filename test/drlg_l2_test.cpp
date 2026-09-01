@@ -1,4 +1,3 @@
-#include <fmt/format.h>
 #include <gtest/gtest.h>
 
 #include "drlg_test.hpp"
@@ -11,6 +10,9 @@ namespace {
 TEST(Drlg_l2, CreateL2Dungeon_diablo_5_1677631846)
 {
 	LoadExpectedLevelData("diablo/5-1677631846.dun");
+
+	LoadCoreArchives();
+	LoadQuestData();
 
 	InitQuests();
 	Quests[Q_BLOOD]._qactive = QUEST_NOTAVAIL;

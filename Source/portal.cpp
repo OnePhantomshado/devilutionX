@@ -6,10 +6,10 @@
 #include "portal.h"
 
 #include "lighting.h"
-#include "misdat.h"
 #include "missiles.h"
 #include "multi.h"
 #include "player.h"
+#include "tables/misdat.h"
 
 namespace devilution {
 
@@ -65,7 +65,7 @@ void SyncPortals()
 	for (int i = 0; i < MAXPORTAL; i++) {
 		if (!Portals[i].open)
 			continue;
-		Player &player = Players[i];
+		const Player &player = Players[i];
 		if (leveltype == DTYPE_TOWN)
 			AddPortalMissile(player, PortalTownPosition[i], true);
 		else {

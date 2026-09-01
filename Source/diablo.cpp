@@ -7,7 +7,17 @@
 #include <cstdint>
 #include <string_view>
 
-#include <fmt/format.h>
+#ifdef USE_SDL3
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_init.h>
+#include <SDL3/SDL_keycode.h>
+#else
+#include <SDL.h>
+
+#ifdef USE_SDL1
+#include "utils/sdl2_to_1_2_backports.h"
+#endif
+#endif
 
 #include <config.h>
 
@@ -15,7 +25,7 @@
 #include "appfat.h"
 #include "automap.h"
 #include "capture.h"
-#include "control.h"
+#include "control/control.hpp"
 #include "cursor.h"
 #include "dead.h"
 #ifdef _DEBUG
@@ -60,11 +70,12 @@
 #include "levels/trigs.h"
 #include "lighting.h"
 #include "loadsave.h"
-#include "lua/lua.hpp"
+#include "lua/lua_event.hpp"
+#include "lua/lua_global.hpp"
 #include "menu.h"
 #include "minitext.h"
 #include "missiles.h"
-#include "monstdat.h"
+#include "mods/mod_identity.h"
 #include "movie.h"
 #include "multi.h"
 #include "nthread.h"
@@ -72,31 +83,37 @@
 #include "options.h"
 #include "panels/console.hpp"
 #include "panels/info_box.hpp"
+#include "panels/partypanel.hpp"
+#include "panels/quest_log.hpp"
 #include "panels/spell_book.hpp"
 #include "panels/spell_list.hpp"
 #include "pfile.h"
-#include "playerdat.hpp"
 #include "plrmsg.h"
 #include "qol/chatlog.h"
 #include "qol/floatingnumbers.h"
 #include "qol/itemlabels.h"
 #include "qol/monhealthbar.h"
 #include "qol/stash.h"
+#include "qol/visual_store.h"
 #include "qol/xpbar.h"
 #include "quick_messages.hpp"
 #include "restrict.h"
 #include "stores.h"
 #include "storm/storm_net.hpp"
 #include "storm/storm_svid.h"
+#include "tables/monstdat.h"
+#include "tables/playerdat.hpp"
 #include "towners.h"
 #include "track.h"
 #include "utils/console.h"
 #include "utils/display.h"
+#include "utils/format.hpp"
 #include "utils/is_of.hpp"
 #include "utils/language.h"
 #include "utils/parse_int.hpp"
 #include "utils/paths.h"
 #include "utils/screen_reader.hpp"
+#include "utils/sdl_compat.h"
 #include "utils/sdl_thread.h"
 #include "utils/status_macros.hpp"
 #include "utils/str_cat.hpp"
@@ -117,10 +134,7 @@
 
 namespace devilution {
 
-uint32_t DungeonSeeds[NUMLEVELS];
-std::optional<uint32_t> LevelSeeds[NUMLEVELS];
 Point MousePosition;
-bool gbRunGame;
 bool gbRunGameResult;
 bool ReturnToMainMenu;
 /** Enable updating of player character, set to false once Diablo dies */
@@ -139,7 +153,7 @@ std::vector<std::string> DebugCmdsFromCommandLine;
 GameLogicStep gGameLogicStep = GameLogicStep::None;
 
 /** This and the following mouse variables are for handling in-game click-and-hold actions */
-MouseActionType LastMouseButtonAction = MouseActionType::None;
+PlayerActionType LastPlayerAction = PlayerActionType::None;
 
 // Controller support: Actions to run after updating the cursor state.
 // Defined in SourceX/controls/plctrls.cpp.
@@ -179,7 +193,7 @@ void StartGame(interface_mode uMsg)
 	InitLevelCursor();
 	sgnTimeoutCurs = CURSOR_NONE;
 	sgbMouseDown = CLICK_NONE;
-	LastMouseButtonAction = MouseActionType::None;
+	LastPlayerAction = PlayerActionType::None;
 }
 
 void FreeGame()
@@ -224,7 +238,7 @@ bool ProcessInput()
 #endif
 		CheckCursMove();
 		plrctrls_after_check_curs_move();
-		RepeatMouseAction();
+		RepeatPlayerAction();
 	}
 
 	return true;
@@ -239,37 +253,38 @@ void LeftMouseCmd(bool bShift)
 	if (leveltype == DTYPE_TOWN) {
 		CloseGoldWithdraw();
 		CloseStash();
+		CloseVisualStore();
 		if (pcursitem != -1 && pcurs == CURSOR_HAND)
 			NetSendCmdLocParam1(true, invflag ? CMD_GOTOGETITEM : CMD_GOTOAGETITEM, cursPosition, pcursitem);
 		if (pcursmonst != -1)
 			NetSendCmdLocParam1(true, CMD_TALKXY, cursPosition, pcursmonst);
 		if (pcursitem == -1 && pcursmonst == -1 && PlayerUnderCursor == nullptr) {
-			LastMouseButtonAction = MouseActionType::Walk;
+			LastPlayerAction = PlayerActionType::Walk;
 			NetSendCmdLoc(MyPlayerId, true, CMD_WALKXY, cursPosition);
 		}
 		return;
 	}
 
-	Player &myPlayer = *MyPlayer;
+	const Player &myPlayer = *MyPlayer;
 	bNear = myPlayer.position.tile.WalkingDistance(cursPosition) < 2;
 	if (pcursitem != -1 && pcurs == CURSOR_HAND && !bShift) {
 		NetSendCmdLocParam1(true, invflag ? CMD_GOTOGETITEM : CMD_GOTOAGETITEM, cursPosition, pcursitem);
 	} else if (ObjectUnderCursor != nullptr && !ObjectUnderCursor->IsDisabled() && (!bShift || (bNear && ObjectUnderCursor->_oBreak == 1))) {
-		LastMouseButtonAction = MouseActionType::OperateObject;
+		LastPlayerAction = PlayerActionType::OperateObject;
 		NetSendCmdLoc(MyPlayerId, true, pcurs == CURSOR_DISARM ? CMD_DISARMXY : CMD_OPOBJXY, cursPosition);
 	} else if (myPlayer.UsesRangedWeapon()) {
 		if (bShift) {
-			LastMouseButtonAction = MouseActionType::Attack;
+			LastPlayerAction = PlayerActionType::Attack;
 			NetSendCmdLoc(MyPlayerId, true, CMD_RATTACKXY, cursPosition);
 		} else if (pcursmonst != -1) {
 			if (CanTalkToMonst(Monsters[pcursmonst])) {
 				NetSendCmdParam1(true, CMD_ATTACKID, pcursmonst);
 			} else {
-				LastMouseButtonAction = MouseActionType::AttackMonsterTarget;
+				LastPlayerAction = PlayerActionType::AttackMonsterTarget;
 				NetSendCmdParam1(true, CMD_RATTACKID, pcursmonst);
 			}
-		} else if (PlayerUnderCursor != nullptr && !myPlayer.friendlyMode) {
-			LastMouseButtonAction = MouseActionType::AttackPlayerTarget;
+		} else if (PlayerUnderCursor != nullptr && !PlayerUnderCursor->hasNoLife() && !myPlayer.friendlyMode) {
+			LastPlayerAction = PlayerActionType::AttackPlayerTarget;
 			NetSendCmdParam1(true, CMD_RATTACKPID, PlayerUnderCursor->getId());
 		}
 	} else {
@@ -278,23 +293,23 @@ void LeftMouseCmd(bool bShift)
 				if (CanTalkToMonst(Monsters[pcursmonst])) {
 					NetSendCmdParam1(true, CMD_ATTACKID, pcursmonst);
 				} else {
-					LastMouseButtonAction = MouseActionType::Attack;
+					LastPlayerAction = PlayerActionType::Attack;
 					NetSendCmdLoc(MyPlayerId, true, CMD_SATTACKXY, cursPosition);
 				}
 			} else {
-				LastMouseButtonAction = MouseActionType::Attack;
+				LastPlayerAction = PlayerActionType::Attack;
 				NetSendCmdLoc(MyPlayerId, true, CMD_SATTACKXY, cursPosition);
 			}
 		} else if (pcursmonst != -1) {
-			LastMouseButtonAction = MouseActionType::AttackMonsterTarget;
+			LastPlayerAction = PlayerActionType::AttackMonsterTarget;
 			NetSendCmdParam1(true, CMD_ATTACKID, pcursmonst);
-		} else if (PlayerUnderCursor != nullptr && !myPlayer.friendlyMode) {
-			LastMouseButtonAction = MouseActionType::AttackPlayerTarget;
+		} else if (PlayerUnderCursor != nullptr && !PlayerUnderCursor->hasNoLife() && !myPlayer.friendlyMode) {
+			LastPlayerAction = PlayerActionType::AttackPlayerTarget;
 			NetSendCmdParam1(true, CMD_ATTACKPID, PlayerUnderCursor->getId());
 		}
 	}
 	if (!bShift && pcursitem == -1 && ObjectUnderCursor == nullptr && pcursmonst == -1 && PlayerUnderCursor == nullptr) {
-		LastMouseButtonAction = MouseActionType::Walk;
+		LastPlayerAction = PlayerActionType::Walk;
 		NetSendCmdLoc(MyPlayerId, true, CMD_WALKXY, cursPosition);
 	}
 }
@@ -304,7 +319,7 @@ bool TryOpenDungeonWithMouse()
 	if (leveltype != DTYPE_TOWN)
 		return false;
 
-	Item &holdItem = MyPlayer->HoldItem;
+	const Item &holdItem = MyPlayer->HoldItem;
 	if (holdItem.IDidx == IDI_RUNEBOMB && OpensHive(cursPosition))
 		OpenHive();
 	else if (holdItem.IDidx == IDI_MAPOFDOOM && OpensGrave(cursPosition))
@@ -318,7 +333,7 @@ bool TryOpenDungeonWithMouse()
 
 void LeftMouseDown(uint16_t modState)
 {
-	LastMouseButtonAction = MouseActionType::None;
+	LastPlayerAction = PlayerActionType::None;
 
 	if (gmenu_left_mouse(true))
 		return;
@@ -352,8 +367,8 @@ void LeftMouseDown(uint16_t modState)
 		return;
 	}
 
-	const bool isShiftHeld = (modState & KMOD_SHIFT) != 0;
-	const bool isCtrlHeld = (modState & KMOD_CTRL) != 0;
+	const bool isShiftHeld = (modState & SDL_KMOD_SHIFT) != 0;
+	const bool isCtrlHeld = (modState & SDL_KMOD_CTRL) != 0;
 
 	if (!GetMainPanel().contains(MousePosition)) {
 		if (!gmenu_is_active() && !TryIconCurs()) {
@@ -371,11 +386,18 @@ void LeftMouseDown(uint16_t modState)
 				if (!IsWithdrawGoldOpen)
 					CheckStashItem(MousePosition, isShiftHeld, isCtrlHeld);
 				CheckStashButtonPress(MousePosition);
+			} else if (IsVisualStoreOpen && GetLeftPanel().contains(MousePosition)) {
+				if (!MyPlayer->HoldItem.isEmpty()) {
+					CheckVisualStorePaste(MousePosition);
+				} else {
+					CheckVisualStoreItem(MousePosition, isCtrlHeld, isShiftHeld);
+				}
+				CheckVisualStoreButtonPress(MousePosition);
 			} else if (SpellbookFlag && GetRightPanel().contains(MousePosition)) {
 				CheckSBook();
 			} else if (!MyPlayer->HoldItem.isEmpty()) {
 				if (!TryOpenDungeonWithMouse()) {
-					Point currentPosition = MyPlayer->position.tile;
+					const Point currentPosition = MyPlayer->position.tile;
 					std::optional<Point> itemTile = FindAdjacentPositionForItem(currentPosition, GetDirection(currentPosition, cursPosition));
 					if (itemTile) {
 						NetSendCmdPItem(true, CMD_PUTITEM, *itemTile, MyPlayer->HoldItem);
@@ -405,8 +427,9 @@ void LeftMouseUp(uint16_t modState)
 	if (MainPanelButtonDown)
 		CheckMainPanelButtonUp();
 	CheckStashButtonRelease(MousePosition);
+	CheckVisualStoreButtonRelease(MousePosition);
 	if (CharPanelButtonActive) {
-		const bool isShiftHeld = (modState & KMOD_SHIFT) != 0;
+		const bool isShiftHeld = (modState & SDL_KMOD_SHIFT) != 0;
 		ReleaseChrBtns(isShiftHeld);
 	}
 	if (LevelButtonDown)
@@ -417,7 +440,7 @@ void LeftMouseUp(uint16_t modState)
 
 void RightMouseDown(bool isShiftHeld)
 {
-	LastMouseButtonAction = MouseActionType::None;
+	LastPlayerAction = PlayerActionType::None;
 
 	if (gmenu_is_active() || sgnTimeoutCurs != CURSOR_NONE || PauseMode == 2 || MyPlayer->_pInvincible) {
 		return;
@@ -446,6 +469,8 @@ void RightMouseDown(bool isShiftHeld)
 	if (pcursinvitem != -1 && UseInvItem(pcursinvitem))
 		return;
 	if (pcursstashitem != StashStruct::EmptyCell && UseStashItem(pcursstashitem))
+		return;
+	if (DidRightClickPartyPortrait())
 		return;
 	if (pcurs == CURSOR_HAND) {
 		CheckPlrSpell(isShiftHeld);
@@ -506,7 +531,7 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 		}
 		KeymapperPress(vkey);
 		if (vkey == SDLK_RETURN || vkey == SDLK_KP_ENTER) {
-			if ((modState & KMOD_ALT) != 0) {
+			if ((modState & SDL_KMOD_ALT) != 0) {
 				options.Graphics.fullscreen.SetValue(!IsFullScreen());
 				if (!demo::IsRunning()) SaveOptions();
 			} else {
@@ -520,7 +545,7 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 	// Disallow player from accessing escape menu during the frames before the death message appears
 	if (vkey == SDLK_ESCAPE && MyPlayer->_pHitPoints > 0) {
 		if (!PressEscKey()) {
-			LastMouseButtonAction = MouseActionType::None;
+			LastPlayerAction = PlayerActionType::None;
 			gamemenu_on();
 		}
 		return;
@@ -542,7 +567,7 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 	KeymapperPress(vkey);
 
 	if (PauseMode == 2) {
-		if ((vkey == SDLK_RETURN || vkey == SDLK_KP_ENTER) && (modState & KMOD_ALT) != 0) {
+		if ((vkey == SDLK_RETURN || vkey == SDLK_KP_ENTER) && (modState & SDL_KMOD_ALT) != 0) {
 			options.Graphics.fullscreen.SetValue(!IsFullScreen());
 			if (!demo::IsRunning()) SaveOptions();
 		}
@@ -571,8 +596,8 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 		}
 		return;
 #ifdef _DEBUG
-	case SDLK_v:
-		if ((modState & KMOD_SHIFT) != 0)
+	case SDLK_V:
+		if ((modState & SDL_KMOD_SHIFT) != 0)
 			NextDebugMonster();
 		else
 			GetDebugMonster();
@@ -580,7 +605,7 @@ void PressKey(SDL_Keycode vkey, uint16_t modState)
 #endif
 	case SDLK_RETURN:
 	case SDLK_KP_ENTER:
-		if ((modState & KMOD_ALT) != 0) {
+		if ((modState & SDL_KMOD_ALT) != 0) {
 			options.Graphics.fullscreen.SetValue(!IsFullScreen());
 			if (!demo::IsRunning()) SaveOptions();
 		} else if (IsPlayerInStore()) {
@@ -669,7 +694,7 @@ void HandleMouseButtonDown(Uint8 button, uint16_t modState)
 	case SDL_BUTTON_RIGHT:
 		if (sgbMouseDown == CLICK_NONE) {
 			sgbMouseDown = CLICK_RIGHT;
-			RightMouseDown((modState & KMOD_SHIFT) != 0);
+			RightMouseDown((modState & SDL_KMOD_SHIFT) != 0);
 		}
 		break;
 	default:
@@ -681,11 +706,11 @@ void HandleMouseButtonDown(Uint8 button, uint16_t modState)
 void HandleMouseButtonUp(Uint8 button, uint16_t modState)
 {
 	if (sgbMouseDown == CLICK_LEFT && button == SDL_BUTTON_LEFT) {
-		LastMouseButtonAction = MouseActionType::None;
+		LastPlayerAction = PlayerActionType::None;
 		sgbMouseDown = CLICK_NONE;
 		LeftMouseUp(modState);
 	} else if (sgbMouseDown == CLICK_RIGHT && button == SDL_BUTTON_RIGHT) {
-		LastMouseButtonAction = MouseActionType::None;
+		LastPlayerAction = PlayerActionType::None;
 		sgbMouseDown = CLICK_NONE;
 	} else {
 		KeymapperRelease(static_cast<SDL_Keycode>(button | KeymapperMouseButtonMask));
@@ -697,11 +722,24 @@ void HandleMouseButtonUp(Uint8 button, uint16_t modState)
 	LogVerbose("Unhandled SDL event: {} {}", name, value);
 }
 
+void PrepareForFadeIn()
+{
+	if (HeadlessMode) return;
+	BlackPalette();
+
+	// Render the game to the buffer(s) with a fully black palette.
+	// Palette fade-in will gradually make it visible.
+	RedrawEverything();
+	while (IsRedrawEverything()) {
+		DrawAndBlit();
+	}
+}
+
 void GameEventHandler(const SDL_Event &event, uint16_t modState)
 {
-	[[maybe_unused]] Options &options = GetOptions();
+	[[maybe_unused]] const Options &options = GetOptions();
 	StaticVector<ControllerButtonEvent, 4> ctrlEvents = ToControllerButtonEvents(event);
-	for (ControllerButtonEvent ctrlEvent : ctrlEvents) {
+	for (const ControllerButtonEvent ctrlEvent : ctrlEvents) {
 		GameAction action;
 		if (HandleControllerButtonEvent(event, ctrlEvent, action) && action.type == GameActionType_SEND_KEY) {
 			if ((action.send_key.vk_code & KeymapperMouseButtonMask) != 0) {
@@ -739,29 +777,29 @@ void GameEventHandler(const SDL_Event &event, uint16_t modState)
 	}
 
 	switch (event.type) {
-	case SDL_KEYDOWN:
-		PressKey(event.key.keysym.sym, modState);
+	case SDL_EVENT_KEY_DOWN:
+		PressKey(SDLC_EventKey(event), modState);
 		return;
-	case SDL_KEYUP:
-		ReleaseKey(event.key.keysym.sym);
+	case SDL_EVENT_KEY_UP:
+		ReleaseKey(SDLC_EventKey(event));
 		return;
-	case SDL_MOUSEMOTION:
+	case SDL_EVENT_MOUSE_MOTION:
 		if (ControlMode == ControlTypes::KeyboardAndMouse && invflag)
 			InvalidateInventorySlot();
-		MousePosition = { event.motion.x, event.motion.y };
+		MousePosition = { SDLC_EventMotionIntX(event), SDLC_EventMotionIntY(event) };
 		gmenu_on_mouse_move();
 		return;
-	case SDL_MOUSEBUTTONDOWN:
-		MousePosition = { event.button.x, event.button.y };
+	case SDL_EVENT_MOUSE_BUTTON_DOWN:
+		MousePosition = { SDLC_EventButtonIntX(event), SDLC_EventButtonIntY(event) };
 		HandleMouseButtonDown(event.button.button, modState);
 		return;
-	case SDL_MOUSEBUTTONUP:
-		MousePosition = { event.button.x, event.button.y };
+	case SDL_EVENT_MOUSE_BUTTON_UP:
+		MousePosition = { SDLC_EventButtonIntX(event), SDLC_EventButtonIntY(event) };
 		HandleMouseButtonUp(event.button.button, modState);
 		return;
 #if SDL_VERSION_ATLEAST(2, 0, 0)
-	case SDL_MOUSEWHEEL:
-		if (event.wheel.y > 0) { // Up
+	case SDL_EVENT_MOUSE_WHEEL:
+		if (SDLC_EventWheelIntY(event) > 0) { // Up
 			if (IsPlayerInStore()) {
 				StoreUp();
 			} else if (QuestLogIsOpen) {
@@ -772,14 +810,14 @@ void GameEventHandler(const SDL_Event &event, uint16_t modState)
 				ChatLogScrollUp();
 			} else if (IsStashOpen) {
 				Stash.PreviousPage();
-			} else if (SDL_GetModState() & KMOD_CTRL) {
+			} else if (SDL_GetModState() & SDL_KMOD_CTRL) {
 				if (AutomapActive) {
 					AutomapZoomIn();
 				}
 			} else {
 				KeymapperPress(MouseScrollUpButton);
 			}
-		} else if (event.wheel.y < 0) { // down
+		} else if (SDLC_EventWheelIntY(event) < 0) { // down
 			if (IsPlayerInStore()) {
 				StoreDown();
 			} else if (QuestLogIsOpen) {
@@ -790,16 +828,16 @@ void GameEventHandler(const SDL_Event &event, uint16_t modState)
 				ChatLogScrollDown();
 			} else if (IsStashOpen) {
 				Stash.NextPage();
-			} else if (SDL_GetModState() & KMOD_CTRL) {
+			} else if (SDL_GetModState() & SDL_KMOD_CTRL) {
 				if (AutomapActive) {
 					AutomapZoomOut();
 				}
 			} else {
 				KeymapperPress(MouseScrollDownButton);
 			}
-		} else if (event.wheel.x > 0) { // left
+		} else if (SDLC_EventWheelIntX(event) > 0) { // left
 			KeymapperPress(MouseScrollLeftButton);
-		} else if (event.wheel.x < 0) { // right
+		} else if (SDLC_EventWheelIntX(event) < 0) { // right
 			KeymapperPress(MouseScrollRightButton);
 		}
 		break;
@@ -813,15 +851,7 @@ void GameEventHandler(const SDL_Event &event, uint16_t modState)
 			sound_stop();
 			ShowProgress(GetCustomEvent(event));
 
-			RedrawEverything();
-			if (!HeadlessMode) {
-				while (IsRedrawEverything()) {
-					// In direct rendering mode with double/triple buffering, we need
-					// to prepare all buffers before fading in.
-					DrawAndBlit();
-				}
-			}
-
+			PrepareForFadeIn();
 			LoadPWaterPalette();
 			if (gbRunGame)
 				PaletteFadeIn(8);
@@ -847,15 +877,7 @@ void RunGameLoop(interface_mode uMsg)
 	gbProcessPlayers = IsDiabloAlive(true);
 	gbRunGameResult = true;
 
-	RedrawEverything();
-	if (!HeadlessMode) {
-		while (IsRedrawEverything()) {
-			// In direct rendering mode with double/triple buffering, we need
-			// to prepare all buffers before fading in.
-			DrawAndBlit();
-		}
-	}
-
+	PrepareForFadeIn();
 	LoadPWaterPalette();
 	PaletteFadeIn(8);
 	InitBackbufferState();
@@ -864,7 +886,7 @@ void RunGameLoop(interface_mode uMsg)
 	nthread_ignore_mutex(false);
 
 	discord_manager::StartGame();
-	LuaEvent("GameStart");
+	lua::GameStart();
 #ifdef GPERF_HEAP_FIRST_GAME_ITERATION
 	unsigned run_game_iteration = 0;
 #endif
@@ -879,12 +901,16 @@ void RunGameLoop(interface_mode uMsg)
 			}
 			DebugCmdsFromCommandLine.clear();
 		}
+#else
+		if (gbIsMultiplayer && IsAssetIntegrityViolated) {
+			app_fatal(_("Cannot play Multiplayer with overridden *.lua, *.tsv, or *.sol assets."));
+		}
 #endif
 
 		SDL_Event event;
 		uint16_t modState;
 		while (FetchMessage(&event, &modState)) {
-			if (event.type == SDL_QUIT) {
+			if (event.type == SDL_EVENT_QUIT) {
 				gbRunGameResult = false;
 				gbRunGame = false;
 				break;
@@ -896,7 +922,7 @@ void RunGameLoop(interface_mode uMsg)
 
 		bool drawGame = true;
 		bool processInput = true;
-		bool runGameLoop = demo::IsRunning() ? demo::GetRunGameLoop(drawGame, processInput) : nthread_has_500ms_passed(&drawGame);
+		const bool runGameLoop = demo::IsRunning() ? demo::GetRunGameLoop(drawGame, processInput) : nthread_has_500ms_passed(&drawGame);
 		if (demo::IsRecording())
 			demo::RecordGameLoopResult(runGameLoop);
 
@@ -905,6 +931,7 @@ void RunGameLoop(interface_mode uMsg)
 		if (!runGameLoop) {
 			if (processInput)
 				ProcessInput();
+			DvlNet_ProcessNetworkPackets();
 			if (!drawGame)
 				continue;
 			RedrawViewport();
@@ -912,7 +939,7 @@ void RunGameLoop(interface_mode uMsg)
 			continue;
 		}
 
-		multi_process_network_packets();
+		ProcessGameMessagePackets();
 		if (game_loop(gbGameLoopStartup))
 			diablo_color_cyc_logic();
 		gbGameLoopStartup = false;
@@ -963,6 +990,26 @@ void PrintHelpOption(std::string_view flags, std::string_view description)
 	printNewlineInConsole();
 }
 
+#if SDL_VERSION_ATLEAST(2, 0, 0)
+FILE *SdlLogFile = nullptr;
+
+extern "C" void SdlLogToFile(void *userdata, int /*category*/, SDL_LogPriority priority, const char *message)
+{
+	FILE *file = reinterpret_cast<FILE *>(userdata);
+	static const char *const LogPriorityPrefixes[SDL_LOG_PRIORITY_COUNT] = {
+		"",
+		"VERBOSE",
+		"DEBUG",
+		"INFO",
+		"WARN",
+		"ERROR",
+		"CRITICAL"
+	};
+	std::fprintf(file, "%s: %s\n", LogPriorityPrefixes[priority], message);
+	std::fflush(file);
+}
+#endif
+
 [[noreturn]] void PrintHelpAndExit()
 {
 	printInConsole((/* TRANSLATORS: Commandline Option */ "Options:"));
@@ -976,6 +1023,9 @@ void PrintHelpOption(std::string_view flags, std::string_view description)
 	PrintHelpOption("-n", _(/* TRANSLATORS: Commandline Option */ "Skip startup videos"));
 	PrintHelpOption("-f", _(/* TRANSLATORS: Commandline Option */ "Display frames per second"));
 	PrintHelpOption("--verbose", _(/* TRANSLATORS: Commandline Option */ "Enable verbose logging"));
+#if SDL_VERSION_ATLEAST(2, 0, 0)
+	PrintHelpOption("--log-to-file <path>", _(/* TRANSLATORS: Commandline Option */ "Log to a file instead of stderr"));
+#endif
 #ifndef DISABLE_DEMOMODE
 	PrintHelpOption("--record <#>", _(/* TRANSLATORS: Commandline Option */ "Record a demo file"));
 	PrintHelpOption("--demo <#>", _(/* TRANSLATORS: Commandline Option */ "Play a demo file"));
@@ -1107,7 +1157,20 @@ void DiabloParseFlags(int argc, char **argv)
 		} else if (arg == "--vanilla") {
 			gbVanilla = true;
 		} else if (arg == "--verbose") {
-			SDL_LogSetAllPriority(SDL_LOG_PRIORITY_VERBOSE);
+			SDL_SetLogPriorities(SDL_LOG_PRIORITY_VERBOSE);
+#if SDL_VERSION_ATLEAST(2, 0, 0)
+		} else if (arg == "--log-to-file") {
+			if (i + 1 == argc) {
+				PrintFlagRequiresArgument("--log-to-file");
+				diablo_quit(64);
+			}
+			SdlLogFile = OpenFile(argv[++i], "wb");
+			if (SdlLogFile == nullptr) {
+				printInConsole("Failed to open log file for writing");
+				diablo_quit(64);
+			}
+			SDL_SetLogOutputFunction(&SdlLogToFile, /*userdata=*/SdlLogFile);
+#endif
 #ifdef _DEBUG
 		} else if (arg == "-i") {
 			DebugDisableNetworkTimeout = true;
@@ -1291,16 +1354,16 @@ void DiabloDeinit()
 	if (was_window_init)
 		dx_cleanup(); // Cleanup SDL surfaces stuff, so we have to do it before SDL_Quit().
 	UnloadFonts();
-	if (SDL_WasInit(SDL_INIT_EVERYTHING & ~SDL_INIT_HAPTIC) != 0)
+	if (SDL_WasInit((~0U) & ~SDL_INIT_HAPTIC) != 0)
 		SDL_Quit();
 }
 
-tl::expected<void, std::string> LoadLvlGFX()
+std::expected<void, std::string> LoadLvlGFX()
 {
 	assert(pDungeonCels == nullptr);
 	constexpr int SpecialCelWidth = 64;
 
-	const auto loadAll = [](const char *cel, const char *til, const char *special) -> tl::expected<void, std::string> {
+	const auto loadAll = [](const char *cel, const char *til, const char *special) -> std::expected<void, std::string> {
 		ASSIGN_OR_RETURN(pDungeonCels, LoadFileInMemWithStatus(cel));
 		ASSIGN_OR_RETURN(pMegaTiles, LoadFileInMemWithStatus<MegaTile>(til));
 		ASSIGN_OR_RETURN(pSpecialCels, LoadCelWithStatus(special, SpecialCelWidth));
@@ -1308,17 +1371,22 @@ tl::expected<void, std::string> LoadLvlGFX()
 	};
 
 	switch (leveltype) {
-	case DTYPE_TOWN:
-		if (gbIsHellfire) {
-			return loadAll(
-			    "nlevels\\towndata\\town.cel",
-			    "nlevels\\towndata\\town.til",
-			    "levels\\towndata\\towns");
+	case DTYPE_TOWN: {
+		auto cel = LoadFileInMemWithStatus("nlevels\\towndata\\town.cel");
+		if (!cel.has_value()) {
+			ASSIGN_OR_RETURN(pDungeonCels, LoadFileInMemWithStatus("levels\\towndata\\town.cel"));
+		} else {
+			pDungeonCels = std::move(*cel);
 		}
-		return loadAll(
-		    "levels\\towndata\\town.cel",
-		    "levels\\towndata\\town.til",
-		    "levels\\towndata\\towns");
+		auto til = LoadFileInMemWithStatus<MegaTile>("nlevels\\towndata\\town.til");
+		if (!til.has_value()) {
+			ASSIGN_OR_RETURN(pMegaTiles, LoadFileInMemWithStatus<MegaTile>("levels\\towndata\\town.til"));
+		} else {
+			pMegaTiles = std::move(*til);
+		}
+		ASSIGN_OR_RETURN(pSpecialCels, LoadCelWithStatus("levels\\towndata\\towns", SpecialCelWidth));
+		return {};
+	}
 	case DTYPE_CATHEDRAL:
 		return loadAll(
 		    "levels\\l1data\\l1.cel",
@@ -1350,11 +1418,11 @@ tl::expected<void, std::string> LoadLvlGFX()
 		    "nlevels\\l5data\\l5.til",
 		    "nlevels\\l5data\\l5s");
 	default:
-		return tl::make_unexpected("LoadLvlGFX");
+		return std::unexpected("LoadLvlGFX");
 	}
 }
 
-tl::expected<void, std::string> LoadAllGFX()
+std::expected<void, std::string> LoadAllGFX()
 {
 	IncProgress();
 #if !defined(USE_SDL1) && !defined(__vita__)
@@ -1363,7 +1431,7 @@ tl::expected<void, std::string> LoadAllGFX()
 	IncProgress();
 	RETURN_IF_ERROR(InitObjectGFX());
 	IncProgress();
-	RETURN_IF_ERROR(InitMissileGFX(gbIsHellfire));
+	RETURN_IF_ERROR(InitMissileGFX());
 	IncProgress();
 	return {};
 }
@@ -1435,7 +1503,7 @@ void UpdateMonsterLights()
 		Monster &monster = Monsters[ActiveMonsters[i]];
 
 		if ((monster.flags & MFLAG_BERSERK) != 0) {
-			int lightRadius = leveltype == DTYPE_NEST ? 9 : 3;
+			const int lightRadius = leveltype == DTYPE_NEST ? 9 : 3;
 			monster.lightId = AddLight(monster.position.tile, lightRadius);
 		}
 
@@ -1445,7 +1513,7 @@ void UpdateMonsterLights()
 				continue;
 			}
 
-			Light &light = Lights[monster.lightId];
+			const Light &light = Lights[monster.lightId];
 			if (monster.position.tile != light.position.tile) {
 				ChangeLightXY(monster.lightId, monster.position.tile);
 			}
@@ -1487,7 +1555,7 @@ void GameLogic()
 	gGameLogicStep = GameLogicStep::None;
 
 #ifdef _DEBUG
-	if (DebugScrollViewEnabled && (SDL_GetModState() & KMOD_SHIFT) != 0) {
+	if (DebugScrollViewEnabled && (SDL_GetModState() & SDL_KMOD_SHIFT) != 0) {
 		ScrollView();
 	}
 #endif
@@ -1510,6 +1578,28 @@ void TimeoutCursor(bool bTimeout)
 			InfoString = StringOrView {};
 			AddInfoBoxString(_("-- Network timeout --"));
 			AddInfoBoxString(_("-- Waiting for players --"));
+			for (uint8_t i = 0; i < Players.size(); i++) {
+				bool isConnected = (player_state[i] & PS_CONNECTED) != 0;
+				bool isActive = (player_state[i] & PS_ACTIVE) != 0;
+				if (!isConnected || isActive) continue;
+
+				DvlNetLatencies latencies = DvlNet_GetLatencies(i);
+
+				std::string ping = FormatRuntime(
+				    _(/* TRANSLATORS: {:s} means: Character Name */ "Player {:s} is timing out!"),
+				    Players[i].name());
+
+				StrAppend(ping, "\n  ", FormatRuntime(_(/* TRANSLATORS: Network connectivity statistics */ "Echo latency: {:d} ms"), latencies.echoLatency));
+
+				if (latencies.providerLatency) {
+					if (latencies.isRelayed && *latencies.isRelayed) {
+						StrAppend(ping, "\n  ", FormatRuntime(_(/* TRANSLATORS: Network connectivity statistics */ "Provider latency: {:d} ms (Relayed)"), *latencies.providerLatency));
+					} else {
+						StrAppend(ping, "\n  ", FormatRuntime(_(/* TRANSLATORS: Network connectivity statistics */ "Provider latency: {:d} ms"), *latencies.providerLatency));
+					}
+				}
+				EventPlrMsg(ping);
+			}
 			NewCursor(CURSOR_HOURGLASS);
 			RedrawEverything();
 		}
@@ -1534,7 +1624,7 @@ void HelpKeyPressed()
 		InfoString = StringOrView {};
 		AddInfoBoxString(_("No help available")); /// BUGFIX: message isn't displayed
 		AddInfoBoxString(_("while in stores"));
-		LastMouseButtonAction = MouseActionType::None;
+		LastPlayerAction = PlayerActionType::None;
 	} else {
 		CloseInventory();
 		CloseCharPanel();
@@ -1571,6 +1661,7 @@ void InventoryKeyPressed()
 	SpellbookFlag = false;
 	CloseGoldWithdraw();
 	CloseStash();
+	CloseVisualStore();
 }
 
 void CharacterSheetKeyPressed()
@@ -1589,6 +1680,11 @@ void CharacterSheetKeyPressed()
 		}
 	}
 	ToggleCharPanel();
+}
+
+void PartyPanelSideToggleKeyPressed()
+{
+	PartySidePanelOpen = !PartySidePanelOpen;
 }
 
 void QuestLogKeyPressed()
@@ -1614,6 +1710,7 @@ void QuestLogKeyPressed()
 	CloseCharPanel();
 	CloseGoldWithdraw();
 	CloseStash();
+	CloseVisualStore();
 }
 
 void DisplaySpellsKeyPressed()
@@ -1629,7 +1726,7 @@ void DisplaySpellsKeyPressed()
 	} else {
 		SpellSelectFlag = false;
 	}
-	LastMouseButtonAction = MouseActionType::None;
+	LastPlayerAction = PlayerActionType::None;
 }
 
 void SpellBookKeyPressed()
@@ -1649,6 +1746,7 @@ void SpellBookKeyPressed()
 		}
 	}
 	CloseInventory();
+	CloseVisualStore();
 }
 
 void CycleSpellHotkeys(bool next)
@@ -1696,15 +1794,49 @@ bool CanPlayerTakeAction()
 bool CanAutomapBeToggledOff()
 {
 	// check if every window is closed - if yes, automap can be toggled off
-	if (!QuestLogIsOpen && !IsWithdrawGoldOpen && !IsStashOpen && !CharFlag
+	return !QuestLogIsOpen && !IsWithdrawGoldOpen && !IsStashOpen && !IsVisualStoreOpen && !CharFlag
 	    && !SpellbookFlag && !invflag && !isGameMenuOpen && !qtextflag && !SpellSelectFlag
-	    && !ChatLogFlag && !HelpFlag)
-		return true;
-
-	return false;
+	    && !ChatLogFlag && !HelpFlag;
 }
 
+void OptionLanguageCodeChanged()
+{
+	UnloadFonts();
+	LanguageInitialize();
+	LoadLanguageArchive();
+	effects_cleanup_sfx(false);
+	if (gbRunGame)
+		sound_init();
+	else
+		ui_sound_init();
+}
+
+const auto OptionChangeHandlerLanguage = (GetOptions().Language.code.SetValueChangedCallback(OptionLanguageCodeChanged), true);
+
 } // namespace
+
+uint32_t GetGameId()
+{
+	uint32_t declared = 0;
+	bool hasDeclared = false;
+	bool hasUnrecognisedMod = false;
+	for (const ModIdentifier &mod : ActiveModIdentifiers) {
+		const std::string &programId = mod.manifest.programId;
+		const uint32_t candidate = programId.size() == 4 ? LoadBE32(programId.data()) : 0;
+		// A mod may not brand itself as DRTL/DSHR
+		if (candidate != 0 && candidate != GameIdDiabloFull && candidate != GameIdDiabloSpawn) {
+			declared = candidate; // last active mod that declares one wins
+			hasDeclared = true;
+		} else if (!mod.whitelisted) {
+			hasUnrecognisedMod = true;
+		}
+	}
+	if (hasDeclared)
+		return declared;
+	if (hasUnrecognisedMod)
+		return GameIdGenericMod;
+	return gbIsSpawn ? GameIdDiabloSpawn : GameIdDiabloFull;
+}
 
 void InitKeymapActions()
 {
@@ -1716,7 +1848,7 @@ void InitKeymapActions()
 		    N_("Use Belt item."),
 		    '1' + i,
 		    [i] {
-			    Player &myPlayer = *MyPlayer;
+			    const Player &myPlayer = *MyPlayer;
 			    if (!myPlayer.SpdList[i].isEmpty() && myPlayer.SpdList[i]._itype != ItemType::Gold) {
 				    UseInvItem(INVITEM_BELT_FIRST + i);
 			    }
@@ -1818,21 +1950,21 @@ void InitKeymapActions()
 	    nullptr,
 	    CanPlayerTakeAction);
 	options.Keymapper.AddAction(
-	    "Item Highlighting",
+	    "ItemHighlighting",
 	    N_("Item highlighting"),
 	    N_("Show/hide items on ground."),
 	    SDLK_LALT,
 	    [] { HighlightKeyPressed(true); },
 	    [] { HighlightKeyPressed(false); });
 	options.Keymapper.AddAction(
-	    "Toggle Item Highlighting",
+	    "ToggleItemHighlighting",
 	    N_("Toggle item highlighting"),
 	    N_("Permanent show/hide items on ground."),
 	    SDLK_RCTRL,
 	    nullptr,
 	    [] { ToggleItemLabelHighlight(); });
 	options.Keymapper.AddAction(
-	    "Toggle Automap",
+	    "ToggleAutomap",
 	    N_("Toggle automap"),
 	    N_("Toggles if automap is displayed."),
 	    SDLK_TAB,
@@ -1843,7 +1975,7 @@ void InitKeymapActions()
 	    "CycleAutomapType",
 	    N_("Cycle map type"),
 	    N_("Opaque -> Transparent -> Minimap -> None"),
-	    SDLK_m,
+	    SDLK_M,
 	    CycleAutomapType,
 	    nullptr,
 	    IsGameRunning);
@@ -1862,6 +1994,14 @@ void InitKeymapActions()
 	    N_("Open Character screen."),
 	    'C',
 	    CharacterSheetKeyPressed,
+	    nullptr,
+	    CanPlayerTakeAction);
+	options.Keymapper.AddAction(
+	    "Party",
+	    N_("Party"),
+	    N_("Open side Party panel."),
+	    'Y',
+	    PartyPanelSideToggleKeyPressed,
 	    nullptr,
 	    CanPlayerTakeAction);
 	options.Keymapper.AddAction(
@@ -1892,7 +2032,7 @@ void InitKeymapActions()
 		    i + 1);
 	}
 	options.Keymapper.AddAction(
-	    "Hide Info Screens",
+	    "HideInfoScreens",
 	    N_("Hide Info Screens"),
 	    N_("Hide all info screens."),
 	    SDLK_SPACE,
@@ -1927,13 +2067,13 @@ void InitKeymapActions()
 	    nullptr,
 	    CanPlayerTakeAction);
 	options.Keymapper.AddAction(
-	    "Pause Game",
+	    "PauseGame",
 	    N_("Pause Game"),
 	    N_("Pauses the game."),
 	    'P',
 	    diablo_pause_game);
 	options.Keymapper.AddAction(
-	    "Pause Game (Alternate)",
+	    "PauseGameAlternate",
 	    N_("Pause Game (Alternate)"),
 	    N_("Pauses the game."),
 	    SDLK_PAUSE,
@@ -1975,8 +2115,8 @@ void InitKeymapActions()
 	    N_("Displays game infos."),
 	    'V',
 	    [] {
-		    EventPlrMsg(fmt::format(
-		                    fmt::runtime(_(/* TRANSLATORS: {:s} means: Character Name, Game Version, Game Difficulty. */ "{:s} {:s}")),
+		    EventPlrMsg(FormatRuntime(
+		                    _(/* TRANSLATORS: {:s} means: Project Name, Game Version. */ "{:s} {:s}"),
 		                    PROJECT_NAME,
 		                    PROJECT_VERSION),
 		        UiFlags::ColorWhite);
@@ -2004,7 +2144,7 @@ void InitKeymapActions()
 	    "OpenConsole",
 	    N_("Console"),
 	    N_("Opens Lua console."),
-	    SDLK_BACKQUOTE,
+	    SDLK_GRAVE,
 	    OpenConsole);
 	options.Keymapper.AddAction(
 	    "DebugToggle",
@@ -2028,7 +2168,7 @@ void InitPadmapActions()
 		    N_("Use Belt item."),
 		    ControllerButton_NONE,
 		    [i] {
-			    Player &myPlayer = *MyPlayer;
+			    const Player &myPlayer = *MyPlayer;
 			    if (!myPlayer.SpdList[i].isEmpty() && myPlayer.SpdList[i]._itype != ItemType::Gold) {
 				    UseInvItem(INVITEM_BELT_FIRST + i);
 			    }
@@ -2064,12 +2204,12 @@ void InitPadmapActions()
 	    ControllerButton_BUTTON_B,
 	    [] {
 		    ControllerActionHeld = GameActionType_PRIMARY_ACTION;
-		    LastMouseButtonAction = MouseActionType::None;
+		    LastPlayerAction = PlayerActionType::None;
 		    PerformPrimaryAction();
 	    },
 	    [] {
 		    ControllerActionHeld = GameActionType_NONE;
-		    LastMouseButtonAction = MouseActionType::None;
+		    LastPlayerAction = PlayerActionType::None;
 	    },
 	    CanPlayerTakeAction);
 	options.Padmapper.AddAction(
@@ -2079,12 +2219,12 @@ void InitPadmapActions()
 	    ControllerButton_BUTTON_Y,
 	    [] {
 		    ControllerActionHeld = GameActionType_SECONDARY_ACTION;
-		    LastMouseButtonAction = MouseActionType::None;
+		    LastPlayerAction = PlayerActionType::None;
 		    PerformSecondaryAction();
 	    },
 	    [] {
 		    ControllerActionHeld = GameActionType_NONE;
-		    LastMouseButtonAction = MouseActionType::None;
+		    LastPlayerAction = PlayerActionType::None;
 	    },
 	    CanPlayerTakeAction);
 	options.Padmapper.AddAction(
@@ -2094,12 +2234,12 @@ void InitPadmapActions()
 	    ControllerButton_BUTTON_X,
 	    [] {
 		    ControllerActionHeld = GameActionType_CAST_SPELL;
-		    LastMouseButtonAction = MouseActionType::None;
+		    LastPlayerAction = PlayerActionType::None;
 		    PerformSpellAction();
 	    },
 	    [] {
 		    ControllerActionHeld = GameActionType_NONE;
-		    LastMouseButtonAction = MouseActionType::None;
+		    LastPlayerAction = PlayerActionType::None;
 	    },
 	    []() { return CanPlayerTakeAction() && !InGameMenu(); });
 	options.Padmapper.AddAction(
@@ -2233,11 +2373,35 @@ void InitPadmapActions()
 	    nullptr,
 	    []() { return CanPlayerTakeAction() && !InGameMenu(); });
 	options.Padmapper.AddAction(
-	    "Toggle Automap",
+	    "ToggleAutomap",
 	    N_("Toggle automap"),
 	    N_("Toggles if automap is displayed."),
 	    ControllerButton_BUTTON_LEFTSTICK,
 	    DoAutoMap);
+	options.Padmapper.AddAction(
+	    "AutomapMoveUp",
+	    N_("Automap Move Up"),
+	    N_("Moves the automap up when active."),
+	    ControllerButton_NONE,
+	    [] {});
+	options.Padmapper.AddAction(
+	    "AutomapMoveDown",
+	    N_("Automap Move Down"),
+	    N_("Moves the automap down when active."),
+	    ControllerButton_NONE,
+	    [] {});
+	options.Padmapper.AddAction(
+	    "AutomapMoveLeft",
+	    N_("Automap Move Left"),
+	    N_("Moves the automap left when active."),
+	    ControllerButton_NONE,
+	    [] {});
+	options.Padmapper.AddAction(
+	    "AutomapMoveRight",
+	    N_("Automap Move Right"),
+	    N_("Moves the automap right when active."),
+	    ControllerButton_NONE,
+	    [] {});
 	options.Padmapper.AddAction(
 	    "MouseUp",
 	    N_("Move mouse up"),
@@ -2263,17 +2427,17 @@ void InitPadmapActions()
 	    { ControllerButton_BUTTON_BACK, ControllerButton_BUTTON_DPAD_RIGHT },
 	    [] {});
 	auto leftMouseDown = [] {
-		ControllerButtonCombo standGroundCombo = GetOptions().Padmapper.ButtonComboForAction("StandGround");
-		bool standGround = StandToggle || IsControllerButtonComboPressed(standGroundCombo);
+		const ControllerButtonCombo standGroundCombo = GetOptions().Padmapper.ButtonComboForAction("StandGround");
+		const bool standGround = StandToggle || IsControllerButtonComboPressed(standGroundCombo);
 		sgbMouseDown = CLICK_LEFT;
-		LeftMouseDown(standGround ? KMOD_SHIFT : KMOD_NONE);
+		LeftMouseDown(standGround ? SDL_KMOD_SHIFT : SDL_KMOD_NONE);
 	};
 	auto leftMouseUp = [] {
-		ControllerButtonCombo standGroundCombo = GetOptions().Padmapper.ButtonComboForAction("StandGround");
-		bool standGround = StandToggle || IsControllerButtonComboPressed(standGroundCombo);
-		LastMouseButtonAction = MouseActionType::None;
+		const ControllerButtonCombo standGroundCombo = GetOptions().Padmapper.ButtonComboForAction("StandGround");
+		const bool standGround = StandToggle || IsControllerButtonComboPressed(standGroundCombo);
+		LastPlayerAction = PlayerActionType::None;
 		sgbMouseDown = CLICK_NONE;
-		LeftMouseUp(standGround ? KMOD_SHIFT : KMOD_NONE);
+		LeftMouseUp(standGround ? SDL_KMOD_SHIFT : SDL_KMOD_NONE);
 	};
 	options.Padmapper.AddAction(
 	    "LeftMouseClick1",
@@ -2290,14 +2454,14 @@ void InitPadmapActions()
 	    leftMouseDown,
 	    leftMouseUp);
 	auto rightMouseDown = [] {
-		ControllerButtonCombo standGroundCombo = GetOptions().Padmapper.ButtonComboForAction("StandGround");
-		bool standGround = StandToggle || IsControllerButtonComboPressed(standGroundCombo);
-		LastMouseButtonAction = MouseActionType::None;
+		const ControllerButtonCombo standGroundCombo = GetOptions().Padmapper.ButtonComboForAction("StandGround");
+		const bool standGround = StandToggle || IsControllerButtonComboPressed(standGroundCombo);
+		LastPlayerAction = PlayerActionType::None;
 		sgbMouseDown = CLICK_RIGHT;
 		RightMouseDown(standGround);
 	};
 	auto rightMouseUp = [] {
-		LastMouseButtonAction = MouseActionType::None;
+		LastPlayerAction = PlayerActionType::None;
 		sgbMouseDown = CLICK_NONE;
 	};
 	options.Padmapper.AddAction(
@@ -2329,9 +2493,9 @@ void InitPadmapActions()
 	    [] { PadMenuNavigatorActive = true; },
 	    [] { PadMenuNavigatorActive = false; });
 	auto toggleGameMenu = [] {
-		bool inMenu = gmenu_is_active();
+		const bool inMenu = gmenu_is_active();
 		PressEscKey();
-		LastMouseButtonAction = MouseActionType::None;
+		LastPlayerAction = PlayerActionType::None;
 		PadHotspellMenuActive = false;
 		PadMenuNavigatorActive = false;
 		if (!inMenu)
@@ -2372,21 +2536,21 @@ void InitPadmapActions()
 	    nullptr,
 	    [&]() { return !gbIsMultiplayer && gbValidSaveFile && !IsPlayerInStore() && IsGameRunning(); });
 	options.Padmapper.AddAction(
-	    "Item Highlighting",
+	    "ItemHighlighting",
 	    N_("Item highlighting"),
 	    N_("Show/hide items on ground."),
 	    ControllerButton_NONE,
 	    [] { HighlightKeyPressed(true); },
 	    [] { HighlightKeyPressed(false); });
 	options.Padmapper.AddAction(
-	    "Toggle Item Highlighting",
+	    "ToggleItemHighlighting",
 	    N_("Toggle item highlighting"),
 	    N_("Permanent show/hide items on ground."),
 	    ControllerButton_NONE,
 	    nullptr,
 	    [] { ToggleItemLabelHighlight(); });
 	options.Padmapper.AddAction(
-	    "Hide Info Screens",
+	    "HideInfoScreens",
 	    N_("Hide Info Screens"),
 	    N_("Hide all info screens."),
 	    ControllerButton_NONE,
@@ -2421,7 +2585,7 @@ void InitPadmapActions()
 	    nullptr,
 	    CanPlayerTakeAction);
 	options.Padmapper.AddAction(
-	    "Pause Game",
+	    "PauseGame",
 	    N_("Pause Game"),
 	    N_("Pauses the game."),
 	    ControllerButton_NONE,
@@ -2463,8 +2627,8 @@ void InitPadmapActions()
 	    N_("Displays game infos."),
 	    ControllerButton_NONE,
 	    [] {
-		    EventPlrMsg(fmt::format(
-		                    fmt::runtime(_(/* TRANSLATORS: {:s} means: Character Name, Game Version, Game Difficulty. */ "{:s} {:s}")),
+		    EventPlrMsg(FormatRuntime(
+		                    _(/* TRANSLATORS: {:s} means: Project Name, Game Version. */ "{:s} {:s}"),
 		                    PROJECT_NAME,
 		                    PROJECT_VERSION),
 		        UiFlags::ColorWhite);
@@ -2513,6 +2677,7 @@ void FreeGameMem()
 	FreeObjectGFX();
 	FreeTownerGFX();
 	FreeStashGFX();
+	FreeVisualStoreGFX();
 #ifndef USE_SDL1
 	DeactivateVirtualGamepad();
 	FreeVirtualGamepadGFX();
@@ -2571,6 +2736,11 @@ void diablo_quit(int exitStatus)
 	FreeGameMem();
 	music_stop();
 	DiabloDeinit();
+
+#if SDL_VERSION_ATLEAST(2, 0, 0)
+	if (SdlLogFile != nullptr) std::fclose(SdlLogFile);
+#endif
+
 	exit(exitStatus);
 }
 
@@ -2586,7 +2756,7 @@ void setOnInitialized(void (*callback)())
 int DiabloMain(int argc, char **argv)
 {
 #ifdef _DEBUG
-	SDL_LogSetAllPriority(SDL_LOG_PRIORITY_DEBUG);
+	SDL_SetLogPriorities(SDL_LOG_PRIORITY_DEBUG);
 #endif
 
 	DiabloParseFlags(argc, argv);
@@ -2611,6 +2781,8 @@ int DiabloMain(int argc, char **argv)
 	// Finally load game data
 	LoadGameArchives();
 
+	LoadTextData();
+
 	// Load dynamic data before we go into the menu as we need to initialise player characters in memory pretty early.
 	LoadPlayerDataFiles();
 
@@ -2620,6 +2792,7 @@ int DiabloMain(int argc, char **argv)
 	LoadMonsterData();
 	LoadItemData();
 	LoadObjectData();
+	LoadQuestData();
 
 	DiabloInit();
 #ifdef __UWP__
@@ -2669,17 +2842,22 @@ bool TryIconCurs()
 		else if (pcursstashitem != StashStruct::EmptyCell) {
 			Item &item = Stash.stashList[pcursstashitem];
 			item._iIdentified = true;
+			Stash.dirty = true;
 		}
 		NewCursor(CURSOR_HAND);
 		return true;
 	}
 
 	if (pcurs == CURSOR_REPAIR) {
-		if (pcursinvitem != -1 && !IsInspectingPlayer())
-			DoRepair(myPlayer, pcursinvitem);
-		else if (pcursstashitem != StashStruct::EmptyCell) {
+		if (pcursinvitem != -1 && !IsInspectingPlayer()) {
+			if (IsVisualStoreOpen)
+				VisualStoreRepairItem(pcursinvitem);
+			else
+				DoRepair(myPlayer, pcursinvitem);
+		} else if (pcursstashitem != StashStruct::EmptyCell) {
 			Item &item = Stash.stashList[pcursstashitem];
 			RepairItem(item, myPlayer.getCharacterLevel());
+			Stash.dirty = true;
 		}
 		NewCursor(CURSOR_HAND);
 		return true;
@@ -2691,6 +2869,7 @@ bool TryIconCurs()
 		else if (pcursstashitem != StashStruct::EmptyCell) {
 			Item &item = Stash.stashList[pcursstashitem];
 			RechargeItem(item, myPlayer);
+			Stash.dirty = true;
 		}
 		NewCursor(CURSOR_HAND);
 		return true;
@@ -2703,6 +2882,7 @@ bool TryIconCurs()
 		else if (pcursstashitem != StashStruct::EmptyCell) {
 			Item &item = Stash.stashList[pcursstashitem];
 			changeCursor = ApplyOilToItem(item, myPlayer);
+			Stash.dirty = true;
 		}
 		if (changeCursor)
 			NewCursor(CURSOR_HAND);
@@ -2714,11 +2894,11 @@ bool TryIconCurs()
 		const SpellType spellType = SpellType::Scroll;
 		const int spellFrom = myPlayer.spellFrom;
 		if (IsWallSpell(spellID)) {
-			Direction sd = GetDirection(myPlayer.position.tile, cursPosition);
+			const Direction sd = GetDirection(myPlayer.position.tile, cursPosition);
 			NetSendCmdLocParam4(true, CMD_SPELLXYD, cursPosition, static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), static_cast<uint16_t>(sd), spellFrom);
-		} else if (pcursmonst != -1) {
+		} else if (pcursmonst != -1 && leveltype != DTYPE_TOWN) {
 			NetSendCmdParam4(true, CMD_SPELLID, pcursmonst, static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), spellFrom);
-		} else if (PlayerUnderCursor != nullptr && !myPlayer.friendlyMode) {
+		} else if (PlayerUnderCursor != nullptr && !PlayerUnderCursor->hasNoLife() && !myPlayer.friendlyMode) {
 			NetSendCmdParam4(true, CMD_SPELLPID, PlayerUnderCursor->getId(), static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), spellFrom);
 		} else {
 			NetSendCmdLocParam3(true, CMD_SPELLXY, cursPosition, static_cast<int8_t>(spellID), static_cast<uint8_t>(spellType), spellFrom);
@@ -2744,7 +2924,7 @@ void diablo_pause_game()
 			PauseMode = 2;
 			sound_stop();
 			qtextflag = false;
-			LastMouseButtonAction = MouseActionType::None;
+			LastPlayerAction = PlayerActionType::None;
 		}
 
 		RedrawEverything();
@@ -2775,7 +2955,7 @@ void diablo_focus_pause()
 	if (!GameWasAlreadyPaused) {
 		PauseMode = 2;
 		sound_stop();
-		LastMouseButtonAction = MouseActionType::None;
+		LastPlayerAction = PlayerActionType::None;
 	}
 
 	SVidMute();
@@ -2859,13 +3039,13 @@ bool PressEscKey()
 	return rv;
 }
 
-void DisableInputEventHandler(const SDL_Event &event, uint16_t modState)
+void DisableInputEventHandler(const SDL_Event &event, uint16_t /*modState*/)
 {
 	switch (event.type) {
-	case SDL_MOUSEMOTION:
-		MousePosition = { event.motion.x, event.motion.y };
+	case SDL_EVENT_MOUSE_MOTION:
+		MousePosition = { SDLC_EventMotionIntX(event), SDLC_EventMotionIntY(event) };
 		return;
-	case SDL_MOUSEBUTTONDOWN:
+	case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		if (sgbMouseDown != CLICK_NONE)
 			return;
 		switch (event.button.button) {
@@ -2878,7 +3058,7 @@ void DisableInputEventHandler(const SDL_Event &event, uint16_t modState)
 		default:
 			return;
 		}
-	case SDL_MOUSEBUTTONUP:
+	case SDL_EVENT_MOUSE_BUTTON_UP:
 		sgbMouseDown = CLICK_NONE;
 		return;
 	}
@@ -2947,21 +3127,21 @@ void LoadGameLevelStores()
 
 void LoadGameLevelStash()
 {
-	bool isHellfireSaveGame = gbIsHellfireSaveGame;
+	const bool isHellfireSaveGame = gbIsHellfireSaveGame;
 
 	gbIsHellfireSaveGame = gbIsHellfire;
 	LoadStash();
 	gbIsHellfireSaveGame = isHellfireSaveGame;
 }
 
-tl::expected<void, std::string> LoadGameLevelDungeon(bool firstflag, lvl_entry lvldir, const Player &myPlayer)
+std::expected<void, std::string> LoadGameLevelDungeon(bool firstflag, lvl_entry lvldir, const Player &myPlayer)
 {
 	if (firstflag || lvldir == ENTRY_LOAD || !myPlayer._pLvlVisited[currlevel] || gbIsMultiplayer) {
 		HoldThemeRooms();
-		[[maybe_unused]] uint32_t mid1Seed = GetLCGEngineState();
+		[[maybe_unused]] const uint32_t mid1Seed = GetLCGEngineState();
 		InitGolems();
 		InitObjects();
-		[[maybe_unused]] uint32_t mid2Seed = GetLCGEngineState();
+		[[maybe_unused]] const uint32_t mid2Seed = GetLCGEngineState();
 
 		IncProgress();
 
@@ -2971,7 +3151,7 @@ tl::expected<void, std::string> LoadGameLevelDungeon(bool firstflag, lvl_entry l
 
 		IncProgress();
 
-		[[maybe_unused]] uint32_t mid3Seed = GetLCGEngineState();
+		[[maybe_unused]] const uint32_t mid3Seed = GetLCGEngineState();
 		InitMissiles();
 		InitCorpses();
 #ifdef _DEBUG
@@ -3050,7 +3230,7 @@ void LoadGameLevelSetVisited()
 	}
 }
 
-tl::expected<void, std::string> LoadGameLevelTown(bool firstflag, lvl_entry lvldir, const Player &myPlayer)
+std::expected<void, std::string> LoadGameLevelTown(bool firstflag, lvl_entry lvldir, const Player &myPlayer)
 {
 	for (int i = 0; i < MAXDUNX; i++) { // NOLINT(modernize-loop-convert)
 		for (int j = 0; j < MAXDUNY; j++) {
@@ -3060,6 +3240,7 @@ tl::expected<void, std::string> LoadGameLevelTown(bool firstflag, lvl_entry lvld
 
 	InitTowners();
 	InitStash();
+	InitVisualStore();
 	InitItems();
 	InitMissiles();
 
@@ -3078,9 +3259,9 @@ tl::expected<void, std::string> LoadGameLevelTown(bool firstflag, lvl_entry lvld
 	return {};
 }
 
-tl::expected<void, std::string> LoadGameLevelSetLevel(bool firstflag, lvl_entry lvldir, const Player &myPlayer)
+std::expected<void, std::string> LoadGameLevelSetLevel(bool firstflag, lvl_entry lvldir, const Player &myPlayer)
 {
-	LoadSetMap();
+	RETURN_IF_ERROR(LoadSetMap());
 	IncProgress();
 	RETURN_IF_ERROR(GetLevelMTypes());
 	IncProgress();
@@ -3091,7 +3272,7 @@ tl::expected<void, std::string> LoadGameLevelSetLevel(bool firstflag, lvl_entry 
 #if !defined(USE_SDL1) && !defined(__vita__)
 		InitVirtualGamepadGFX();
 #endif
-		RETURN_IF_ERROR(InitMissileGFX(gbIsHellfire));
+		RETURN_IF_ERROR(InitMissileGFX());
 		IncProgress();
 	}
 	InitCorpses();
@@ -3130,7 +3311,7 @@ tl::expected<void, std::string> LoadGameLevelSetLevel(bool firstflag, lvl_entry 
 	return {};
 }
 
-tl::expected<void, std::string> LoadGameLevelStandardLevel(bool firstflag, lvl_entry lvldir, const Player &myPlayer)
+std::expected<void, std::string> LoadGameLevelStandardLevel(bool firstflag, lvl_entry lvldir, const Player &myPlayer)
 {
 	CreateLevel(lvldir);
 
@@ -3152,7 +3333,7 @@ tl::expected<void, std::string> LoadGameLevelStandardLevel(bool firstflag, lvl_e
 
 		IncProgress();
 
-		RETURN_IF_ERROR(InitMissileGFX(gbIsHellfire));
+		RETURN_IF_ERROR(InitMissileGFX());
 
 		IncProgress();
 		IncProgress();
@@ -3179,9 +3360,9 @@ tl::expected<void, std::string> LoadGameLevelStandardLevel(bool firstflag, lvl_e
 	SetRndSeedForDungeonLevel();
 
 	if (leveltype == DTYPE_TOWN) {
-		LoadGameLevelTown(firstflag, lvldir, myPlayer);
+		RETURN_IF_ERROR(LoadGameLevelTown(firstflag, lvldir, myPlayer));
 	} else {
-		LoadGameLevelDungeon(firstflag, lvldir, myPlayer);
+		RETURN_IF_ERROR(LoadGameLevelDungeon(firstflag, lvldir, myPlayer));
 	}
 
 	PlayDungMsgs();
@@ -3206,21 +3387,22 @@ void LoadGameLevelCrypt()
 void LoadGameLevelCalculateCursor()
 {
 	// Recalculate mouse selection of entities after level change/load
-	LastMouseButtonAction = MouseActionType::None;
+	LastPlayerAction = PlayerActionType::None;
 	sgbMouseDown = CLICK_NONE;
 	ResetItemlabelHighlighted(); // level changed => item changed
 	pcursmonst = -1;             // ensure pcurstemp is set to a valid value
 	CheckCursMove();
 }
 
-tl::expected<void, std::string> LoadGameLevel(bool firstflag, lvl_entry lvldir)
+std::expected<void, std::string> LoadGameLevel(bool firstflag, lvl_entry lvldir)
 {
-	_music_id neededTrack = GetLevelMusic(leveltype);
+	const _music_id neededTrack = GetLevelMusic(leveltype);
 
 	ClearFloatingNumbers();
 	LoadGameLevelStopMusic(neededTrack);
 	LoadGameLevelResetCursor();
 	SetRndSeedForDungeonLevel();
+	NaKrulTomeSequence = 0;
 
 	IncProgress();
 
@@ -3231,7 +3413,7 @@ tl::expected<void, std::string> LoadGameLevel(bool firstflag, lvl_entry lvldir)
 	IncProgress();
 
 	RETURN_IF_ERROR(LoadLvlGFX());
-	SetDungeonMicros();
+	SetDungeonMicros(pDungeonCels, MicroTileLen);
 	ClearClxDrawCache();
 
 	IncProgress();
@@ -3260,7 +3442,7 @@ tl::expected<void, std::string> LoadGameLevel(bool firstflag, lvl_entry lvldir)
 
 	IncProgress();
 
-	Player &myPlayer = *MyPlayer;
+	const Player &myPlayer = *MyPlayer;
 
 	if (setlevel) {
 		RETURN_IF_ERROR(LoadGameLevelSetLevel(firstflag, lvldir, myPlayer));
@@ -3302,7 +3484,7 @@ tl::expected<void, std::string> LoadGameLevel(bool firstflag, lvl_entry lvldir)
 
 bool game_loop(bool bStartup)
 {
-	uint16_t wait = bStartup ? sgGameInitInfo.nTickRate * 3 : 3;
+	const uint16_t wait = bStartup ? sgGameInitInfo.nTickRate * 3 : 3;
 
 	for (unsigned i = 0; i < wait; i++) {
 		if (!multi_handle_delta()) {

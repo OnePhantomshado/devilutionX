@@ -27,7 +27,7 @@ jobs:
     container: amigadev/crosstools:m68k-amigaos-gcc10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -50,7 +50,7 @@ jobs:
 
       - name: Upload Package
         if: ${{ !env.ACT }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: devilutionx_m68k
           path: ./build/devilutionx
@@ -62,4 +62,3 @@ jobs:
           asset_name: devilutionx-amiga-m68k
           file: ./build/devilutionx
           overwrite: true
-...

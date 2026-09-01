@@ -39,4 +39,36 @@ bool IsEnemyValid(size_t monsterId, size_t enemyId)
 	return IsEnemyValid(enemyId, true);
 }
 
+bool IsMonsterValid(const Monster &monster)
+{
+	const CMonster &monsterType = LevelMonsterTypes[monster.levelType];
+	const _monster_id monsterId = monsterType.type;
+	const auto monsterIndex = static_cast<size_t>(monsterId);
+
+	if (monsterIndex >= MonstersData.size()) {
+		return false;
+	}
+
+	if (monster.isUnique() && !IsUniqueMonsterValid(monster)) {
+		return false;
+	}
+
+	return true;
+}
+
+bool IsUniqueMonsterValid(const Monster &monster)
+{
+	assert(monster.isUnique());
+
+	const auto uniqueMonsterIndex = static_cast<size_t>(monster.uniqueType);
+	if (uniqueMonsterIndex >= UniqueMonstersData.size()) {
+		return false;
+	}
+
+	const CMonster &monsterType = LevelMonsterTypes[monster.levelType];
+	const _monster_id monsterId = monsterType.type;
+	const UniqueMonsterData &uniqueMonsterData = UniqueMonstersData.at(uniqueMonsterIndex);
+	return monsterId == uniqueMonsterData.mtype;
+}
+
 } // namespace devilution

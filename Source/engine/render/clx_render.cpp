@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <format>
 
 #include "engine/point.hpp"
 #include "engine/render/blit_impl.hpp"
@@ -16,7 +17,6 @@
 #include "utils/static_vector.hpp"
 
 #ifdef DEBUG_CLX
-#include <fmt/format.h>
 
 #include "utils/str_cat.hpp"
 #endif
@@ -59,7 +59,7 @@ struct ClipX {
 DVL_ALWAYS_INLINE DVL_ATTRIBUTE_HOT ClipX CalculateClipX(int_fast16_t x, std::size_t w, const Surface &out)
 {
 	ClipX clip;
-	clip.left = static_cast<int_fast16_t>(x < 0 ? -x : 0);
+	clip.left = (x < 0 ? -x : 0);
 	clip.right = static_cast<int_fast16_t>(static_cast<int_fast16_t>(x + w) > out.w() ? x + w - out.w() : 0);
 	clip.width = static_cast<int_fast16_t>(w - clip.left - clip.right);
 	return clip;
@@ -126,6 +126,7 @@ void DoRenderBackwardsClipY(
 					src.begin += v;
 				}
 			}
+			DVL_ASSUME(v >= 1); // All runs (transparent, fill, pixel) are at least 1px wide
 			dst += v;
 			remainingWidth -= v;
 		}
@@ -223,7 +224,7 @@ void DoRenderBackwards(
 	const ClipX clipX = CalculateClipX(position.x, srcWidth, out);
 	if (clipX.width <= 0)
 		return;
-	RenderSrc srcForBackwards { src, src + srcSize, static_cast<uint_fast16_t>(srcWidth) };
+	const RenderSrc srcForBackwards { src, src + srcSize, static_cast<uint_fast16_t>(srcWidth) };
 	if (static_cast<std::size_t>(clipX.width) == srcWidth) {
 		DoRenderBackwardsClipY(
 		    out, position, srcForBackwards, std::forward<BlitFn>(blitFn));
@@ -236,7 +237,7 @@ void DoRenderBackwards(
 constexpr size_t MaxOutlinePixels = 4096;
 constexpr size_t MaxOutlineSpriteWidth = 253;
 using OutlinePixels = StaticVector<PointOf<uint8_t>, MaxOutlinePixels>;
-using OutlineRowSolidRuns = StaticVector<std::pair<uint8_t, uint8_t>, MaxOutlineSpriteWidth / 2 + 1>;
+using OutlineRowSolidRuns = StaticVector<std::pair<uint8_t, uint8_t>, (MaxOutlineSpriteWidth / 2) + 1>;
 
 struct OutlinePixelsCacheEntry {
 	OutlinePixels outlinePixels;
@@ -448,14 +449,14 @@ void ClxApplyTrans(ClxSprite sprite, const uint8_t *trn)
 
 void ClxApplyTrans(ClxSpriteList list, const uint8_t *trn)
 {
-	for (ClxSprite sprite : list) {
+	for (const ClxSprite sprite : list) {
 		ClxApplyTrans(sprite, trn);
 	}
 }
 
 void ClxApplyTrans(ClxSpriteSheet sheet, const uint8_t *trn)
 {
-	for (ClxSpriteList list : sheet) {
+	for (const ClxSpriteList list : sheet) {
 		ClxApplyTrans(list, trn);
 	}
 }
@@ -492,14 +493,14 @@ bool IsPointWithinClx(Point position, ClxSprite clx)
 
 			if (IsClxOpaqueFill(val)) {
 				val = GetClxOpaqueFillWidth(val);
-				uint8_t color = *src++;
+				const uint8_t color = *src++;
 				if (xCur <= position.x && position.x < xCur + val)
 					return color != 0; // ignore shadows
 				xCur += val;
 			} else {
 				val = GetClxOpaquePixelsWidth(val);
 				for (uint8_t pixel = 0; pixel < val; pixel++) {
-					uint8_t color = *src++;
+					const uint8_t color = *src++;
 					if (xCur == position.x)
 						return color != 0; // ignore shadows
 					xCur++;
@@ -563,15 +564,20 @@ std::string ClxDescribe(ClxSprite clx)
 		if (IsClxOpaque(control)) {
 			if (IsClxOpaqueFill(control)) {
 				const uint8_t length = GetClxOpaqueFillWidth(control);
-				out.append(fmt::format("Fill    | {:>5} | {:>5} | {}\n", length, 2, src[1]));
+				out.append(std::format("Fill    | {:>5} | {:>5} | {}\n", length, 2, src[1]));
 				++src;
 			} else {
 				const uint8_t length = GetClxOpaquePixelsWidth(control);
-				out.append(fmt::format("Pixels  | {:>5} | {:>5} | {}\n", length, length + 1, fmt::join(src + 1, src + 1 + length, " ")));
+				std::string pixels;
+				for (const uint8_t *it = src + 1, *pixelsEnd = src + 1 + length; it != pixelsEnd; ++it) {
+					if (!pixels.empty()) pixels += ' ';
+					StrAppend(pixels, *it);
+				}
+				out.append(std::format("Pixels  | {:>5} | {:>5} | {}\n", length, length + 1, pixels));
 				src += length;
 			}
 		} else {
-			out.append(fmt::format("Transp. | {:>5} | {:>5} |\n", control, 1));
+			out.append(std::format("Transp. | {:>5} | {:>5} |\n", control, 1));
 		}
 	}
 	return out;

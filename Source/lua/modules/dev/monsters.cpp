@@ -11,9 +11,9 @@
 #include "levels/tile_properties.hpp"
 #include "lighting.h"
 #include "lua/metadoc.hpp"
-#include "monstdat.h"
 #include "monster.h"
 #include "player.h"
+#include "tables/monstdat.h"
 #include "utils/str_case.hpp"
 #include "utils/str_cat.hpp"
 
@@ -59,7 +59,7 @@ std::string DebugCmdSpawnUniqueMonster(std::string name, std::optional<unsigned>
 	if (!found) {
 		if (LevelMonsterTypeCount == MaxLvlMTypes)
 			LevelMonsterTypeCount--; // we are running out of monster types, so override last used monster type
-		tl::expected<size_t, std::string> idResult = AddMonsterType(uniqueIndex, PLACE_SCATTER);
+		std::expected<size_t, std::string> idResult = AddMonsterType(uniqueIndex, PLACE_SCATTER);
 		if (!idResult.has_value()) return std::move(idResult).error();
 		id = idResult.value();
 		CMonster &monsterType = LevelMonsterTypes[id];
@@ -107,12 +107,12 @@ std::string DebugCmdSpawnMonster(std::string name, std::optional<unsigned> count
 
 	int mtype = -1;
 
-	for (int i = 0; i < NUM_MTYPES; i++) {
+	for (size_t i = 0; i < MonstersData.size(); i++) {
 		const auto &mondata = MonstersData[i];
 		const std::string monsterName = AsciiStrToLower(std::string_view(mondata.name));
 		if (monsterName.find(name) == std::string::npos)
 			continue;
-		mtype = i;
+		mtype = static_cast<int>(i);
 		if (monsterName == name) // to support partial name matching but always choose the correct monster if full name is given
 			break;
 	}
@@ -134,7 +134,7 @@ std::string DebugCmdSpawnMonster(std::string name, std::optional<unsigned> count
 	if (!found) {
 		if (LevelMonsterTypeCount == MaxLvlMTypes)
 			LevelMonsterTypeCount--; // we are running out of monster types, so override last used monster type
-		tl::expected<size_t, std::string> idResult = AddMonsterType(static_cast<_monster_id>(mtype), PLACE_SCATTER);
+		std::expected<size_t, std::string> idResult = AddMonsterType(static_cast<_monster_id>(mtype), PLACE_SCATTER);
 		if (!idResult.has_value()) return std::move(idResult).error();
 		id = idResult.value();
 		CMonster &monsterType = LevelMonsterTypes[id];
@@ -172,8 +172,8 @@ std::string DebugCmdSpawnMonster(std::string name, std::optional<unsigned> count
 sol::table LuaDevMonstersModule(sol::state_view &lua)
 {
 	sol::table table = lua.create_table();
-	SetDocumented(table, "spawn", "(name: string, count: number = 1)", "Spawn monster(s)", &DebugCmdSpawnMonster);
-	SetDocumented(table, "spawnUnique", "(name: string, count: number = 1)", "Spawn unique monster(s)", &DebugCmdSpawnUniqueMonster);
+	LuaSetDocFn(table, "spawn", "(name: string, count: number = 1)", "Spawn monster(s)", &DebugCmdSpawnMonster);
+	LuaSetDocFn(table, "spawnUnique", "(name: string, count: number = 1)", "Spawn unique monster(s)", &DebugCmdSpawnUniqueMonster);
 	return table;
 }
 

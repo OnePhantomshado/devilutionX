@@ -7,20 +7,20 @@
 
 #include <cmath>
 #include <cstdint>
+#include <expected>
 #include <string>
 
-#include <expected.hpp>
-
 #include "cursor.h"
+#include "cursor_defs.hpp"
 #include "engine/clx_sprite.hpp"
 #include "engine/point.hpp"
 #include "engine/rectangle.hpp"
 #include "engine/world_tile.hpp"
-#include "itemdat.h"
 #include "levels/dun_tile.hpp"
 #include "monster.h"
-#include "objdat.h"
-#include "textdat.h"
+#include "tables/itemdat.h"
+#include "tables/objdat.h"
+#include "tables/textdat.h"
 #include "utils/attributes.h"
 #include "utils/is_of.hpp"
 #include "utils/string_or_view.hpp"
@@ -287,6 +287,8 @@ extern int ActiveObjects[MAXOBJECTS];
 extern int ActiveObjectCount;
 /** @brief Indicates that objects are being loaded during gameplay and pre calculated data should be updated. */
 extern bool LoadingMapObjects;
+/** Tracks progress through the tome sequence that spawns Na-Krul (see OperateNakrulBook()) */
+extern int NaKrulTomeSequence;
 
 /**
  * @brief Find an object given a point in map coordinates
@@ -327,14 +329,14 @@ inline Object &ObjectAtPosition(Point position)
  */
 bool IsItemBlockingObjectAtPosition(Point position);
 
-tl::expected<void, std::string> InitObjectGFX();
+std::expected<void, std::string> InitObjectGFX();
 void FreeObjectGFX();
 void AddL1Objs(int x1, int y1, int x2, int y2);
 void AddL2Objs(int x1, int y1, int x2, int y2);
 void AddL3Objs(int x1, int y1, int x2, int y2);
 void AddCryptObjects(int x1, int y1, int x2, int y2);
 void InitObjects();
-void SetMapObjects(const uint16_t *dunData, int startx, int starty);
+std::expected<void, std::string> SetMapObjects(const uint16_t *dunData, int startx, int starty);
 /**
  * @brief Spawns an object of the given type at the map coordinates provided
  * @param objType Type specifier
@@ -351,7 +353,7 @@ void ObjChangeMapResync(int x1, int y1, int x2, int y2);
 _item_indexes ItemMiscIdIdx(item_misc_id imiscid);
 void OperateObject(Player &player, Object &object);
 void SyncOpObject(Player &player, int cmd, Object &object);
-void BreakObjectMissile(const Player *player, Object &object);
+void BreakObjectMissile(Object &object);
 void BreakObject(const Player &player, Object &object);
 void DeltaSyncOpObject(Object &object);
 void DeltaSyncCloseObj(Object &object);

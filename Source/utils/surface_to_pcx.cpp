@@ -4,24 +4,31 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <expected>
 #include <string>
 
+#ifdef USE_SDL3
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_iostream.h>
+#else
 #include <SDL.h>
-#include <expected.hpp>
+#endif
 
 #include "engine/surface.hpp"
+#include "utils/endian_swap.hpp"
 #include "utils/pcx.hpp"
+#include "utils/sdl_compat.h"
 
 namespace devilution {
 namespace {
 
-tl::expected<void, std::string> CheckedFWrite(const void *ptr, size_t size, SDL_RWops *out)
+std::expected<void, std::string> CheckedFWrite(const void *ptr, size_t size, SDL_IOStream *out)
 {
-	if (SDL_RWwrite(out, ptr, size, 1) != 1) {
+	if (SDL_WriteIO(out, ptr, size) != size) {
 		const char *errorMessage = SDL_GetError();
 		if (errorMessage == nullptr)
 			errorMessage = "";
-		tl::expected<void, std::string> result = tl::make_unexpected(std::string("write failed with: ").append(errorMessage));
+		std::expected<void, std::string> result = std::unexpected(std::string("write failed with: ").append(errorMessage));
 		SDL_ClearError();
 		return result;
 	}
@@ -35,7 +42,7 @@ tl::expected<void, std::string> CheckedFWrite(const void *ptr, size_t size, SDL_
  * @param out File stream to write to
  * @return True on success
  */
-tl::expected<void, std::string> WritePcxHeader(int16_t width, int16_t height, SDL_RWops *out)
+std::expected<void, std::string> WritePcxHeader(int16_t width, int16_t height, SDL_IOStream *out)
 {
 	PCXHeader buffer;
 
@@ -44,12 +51,12 @@ tl::expected<void, std::string> WritePcxHeader(int16_t width, int16_t height, SD
 	buffer.Version = 5;
 	buffer.Encoding = 1;
 	buffer.BitsPerPixel = 8;
-	buffer.Xmax = SDL_SwapLE16(width - 1);
-	buffer.Ymax = SDL_SwapLE16(height - 1);
-	buffer.HDpi = SDL_SwapLE16(width);
-	buffer.VDpi = SDL_SwapLE16(height);
+	buffer.Xmax = Swap16LE(width - 1);
+	buffer.Ymax = Swap16LE(height - 1);
+	buffer.HDpi = Swap16LE(width);
+	buffer.VDpi = Swap16LE(height);
 	buffer.NPlanes = 1;
-	buffer.BytesPerLine = SDL_SwapLE16(width);
+	buffer.BytesPerLine = Swap16LE(width);
 
 	return CheckedFWrite(&buffer, sizeof(buffer), out);
 }
@@ -60,7 +67,7 @@ tl::expected<void, std::string> WritePcxHeader(int16_t width, int16_t height, SD
  * @param out File stream for the PCX file.
  * @return True if successful, else false
  */
-tl::expected<void, std::string> WritePcxPalette(SDL_Color *palette, SDL_RWops *out)
+std::expected<void, std::string> WritePcxPalette(SDL_Color *palette, SDL_IOStream *out)
 {
 	uint8_t pcxPalette[1 + 256 * 3];
 
@@ -123,7 +130,7 @@ uint8_t *WritePcxLine(uint8_t *src, uint8_t *dst, int width)
  * @param out File stream for the PCX file.
  * @return True if successful, else false
  */
-tl::expected<void, std::string> WritePcxPixels(const Surface &buf, SDL_RWops *out)
+std::expected<void, std::string> WritePcxPixels(const Surface &buf, SDL_IOStream *out)
 {
 	const int width = buf.w();
 	const std::unique_ptr<uint8_t[]> pBuffer { new uint8_t[static_cast<size_t>(2 * width)] };
@@ -131,7 +138,7 @@ tl::expected<void, std::string> WritePcxPixels(const Surface &buf, SDL_RWops *ou
 	for (int height = buf.h(); height > 0; height--) {
 		const uint8_t *pBufferEnd = WritePcxLine(pixels, pBuffer.get(), width);
 		pixels += buf.pitch();
-		tl::expected<void, std::string> result = CheckedFWrite(pBuffer.get(), pBufferEnd - pBuffer.get(), out);
+		std::expected<void, std::string> result = CheckedFWrite(pBuffer.get(), pBufferEnd - pBuffer.get(), out);
 		if (!result.has_value()) return result;
 	}
 	return {};
@@ -139,16 +146,16 @@ tl::expected<void, std::string> WritePcxPixels(const Surface &buf, SDL_RWops *ou
 
 } // namespace
 
-tl::expected<void, std::string>
-WriteSurfaceToFilePcx(const Surface &buf, SDL_RWops *outStream)
+std::expected<void, std::string>
+WriteSurfaceToFilePcx(const Surface &buf, SDL_IOStream *outStream)
 {
-	tl::expected<void, std::string> result = WritePcxHeader(buf.w(), buf.h(), outStream);
+	std::expected<void, std::string> result = WritePcxHeader(buf.w(), buf.h(), outStream);
 	if (!result.has_value()) return result;
 	result = WritePcxPixels(buf, outStream);
 	if (!result.has_value()) return result;
 	result = WritePcxPalette(buf.surface->format->palette->colors, outStream);
 	if (!result.has_value()) return result;
-	SDL_RWclose(outStream);
+	SDL_CloseIO(outStream);
 	return {};
 }
 

@@ -31,6 +31,7 @@ include(functions/genex)
 
 # Options required by `VcPkgManifestFeatures`, which must be included before the `project` call.
 option(USE_SDL1 "Use SDL1.2 instead of SDL2" OFF)
+option(USE_SDL3 "Use SDL3 instead of SDL2" OFF)
 option(NONET "Disable network support" OFF)
 cmake_dependent_option(PACKET_ENCRYPTION "Encrypt network packets" ON "NOT NONET" OFF)
 # The gettext[tools] package takes a very long time to install
@@ -72,6 +73,14 @@ if(NOT VERSION_SUFFIX)
   endif()
 endif()
 
+# The iOS toolchain file reads DEPLOYMENT_TARGET when it is processed by
+# `project()`, so the default must be set before that.
+# libc++'s <format> requires the floating-point std::to_chars symbols,
+# which are only available in the iOS 16.3+ system libc++.
+if(CMAKE_TOOLCHAIN_FILE MATCHES "ios\\.toolchain\\.cmake" AND NOT DEFINED DEPLOYMENT_TARGET)
+  set(DEPLOYMENT_TARGET "16.3")
+endif()
+
 project(DevilutionX
   VERSION ${VERSION_NUM}
   LANGUAGES C CXX)
@@ -105,9 +114,18 @@ option(WIN_NSIS "Generate an NSIS installer" OFF)
 cmake_dependent_option(DISABLE_TCP "Disable TCP multiplayer option" OFF "NOT NONET" ON)
 cmake_dependent_option(DISABLE_ZERO_TIER "Disable ZeroTier multiplayer option" OFF "NOT NONET" ON)
 
+if(USE_SDL1 AND USE_SDL3)
+  message(FATAL_ERROR "USE_SDL1 and USE_SDL3 cannot be set at the same time")
+endif()
+
 # Graphics options
 if(NOT USE_SDL1)
-  set(DEVILUTIONX_DISPLAY_TEXTURE_FORMAT "SDL_PIXELFORMAT_RGB888" CACHE STRING "Texture format for DevilutionX textures when using the GPU renderer")
+if(USE_SDL3)
+  set(_texture_format_default "SDL_PIXELFORMAT_XRGB8888")
+else()
+  set(_texture_format_default "SDL_PIXELFORMAT_RGB888")
+endif()
+  set(DEVILUTIONX_DISPLAY_TEXTURE_FORMAT "${_texture_format_default}" CACHE STRING "Texture format for DevilutionX textures when using the GPU renderer")
   mark_as_advanced(DEVILUTIONX_DISPLAY_TEXTURE_FORMAT)
 endif()
 
@@ -171,19 +189,19 @@ else()
   set(SUPPORTS_MPQ ON)
 endif()
 
-# By default, devilutionx.mpq is built only if smpq is installed and MPQ support is enabled.
+# By default, devilutionx.mpq and mods/hf.mpq are built only if smpq is installed and MPQ support is enabled.
 if(SUPPORTS_MPQ AND NOT UNPACKED_MPQS)
-  if(NOT DEFINED BUILD_ASSETS_MPQ AND NOT SRC_DIST)
-    find_program(SMPQ smpq)
-  elseif(BUILD_ASSETS_MPQ)
+  if(BUILD_ASSETS_MPQ OR (CPACK STREQUAL "ON" AND (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")))
     find_program(SMPQ smpq REQUIRED)
+  elseif(NOT DEFINED BUILD_ASSETS_MPQ AND NOT SRC_DIST)
+    find_program(SMPQ smpq)
   endif()
   if(SMPQ)
     set(_has_smpq ON)
   else()
     set(_has_smpq OFF)
   endif()
-  option(BUILD_ASSETS_MPQ "If true, assets are packaged into devilutionx.mpq." ${_has_smpq})
+  option(BUILD_ASSETS_MPQ "If true, assets are packaged into devilutionx.mpq and mods/hf to hf.mpq." ${_has_smpq})
 else()
   set(BUILD_ASSETS_MPQS OFF)
 endif()
@@ -256,12 +274,20 @@ endif()
 #
 # PS4 toolchain crashes in `create-fself` when linking with these flags, so we exclude it:
 # https://github.com/PacBrew/ps4-openorbis/issues/8
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT PS4)
+# On m68k-amigaos, `--gc-sections` discards static constexpr data that is still
+# referenced (magic_enum's per-enum name tables are the visible casualty: the
+# string_views survive with correct lengths but point at collected storage, so
+# every enum name reads as garbage). Excluded here for the same reason as PS4.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT PS4 AND NOT AMIGA)
   add_compile_options("$<$<NOT:$<CONFIG:Debug>>:-ffunction-sections;-fdata-sections>")
   if(APPLE)
     add_link_options("$<$<NOT:$<CONFIG:Debug>>:LINKER:-dead_strip>")
   else()
-    add_link_options("$<$<NOT:$<CONFIG:Debug>>:LINKER:--gc-sections,--as-needed>")
+    add_link_options("$<$<NOT:$<CONFIG:Debug>>:LINKER:--gc-sections>")
+    # Emscripten's linker (wasm-ld) does not support --as-needed.
+    if(NOT EMSCRIPTEN)
+      add_link_options("$<$<NOT:$<CONFIG:Debug>>:LINKER:--as-needed>")
+    endif()
   endif()
 endif()
 
@@ -291,7 +317,7 @@ endif()
 
 # Not a genexp because CMake doesn't support it
 # https://gitlab.kitware.com/cmake/cmake/-/issues/20546
-if(NOT DISABLE_LTO)
+if(NOT DISABLE_LTO AND NOT EMSCRIPTEN)
   # LTO if supported:
   include(CheckIPOSupported)
   check_ipo_supported(RESULT is_ipo_supported OUTPUT lto_error)
@@ -319,8 +345,13 @@ if(GPERF)
   endif()
 endif()
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD 23)
+
+# On some platforms, such as DJGPP,
+# `-std=c++23` defines `__STRICT_ANSI__` which disables
+# all POSIX extensions, so we need to use `-std=gnu++23` instead.
+set(CMAKE_CXX_EXTENSIONS ON)
+
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for clang-tidy
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
@@ -330,14 +361,24 @@ find_package(Threads REQUIRED)
 # Dependencies must be included after Platforms.
 include(Dependencies)
 
+# If a C++ library is linked dynamically, it will load libstdc++.so at runtime.
+# Mixing `-static-libstdc++` with a dynamic C++ dependency causes both copies
+# to initialize, which is UB and can cause crashes, e.g. in
+# `std::ios_base_library_init()`.
+if(NOT NOSOUND AND NOT DEVILUTIONX_STATIC_SDL_AUDIOLIB)
+  set(DEVILUTIONX_STATIC_CXX_STDLIB OFF)
+endif()
+
 add_subdirectory(Source)
 
 set(BIN_TARGET devilutionx)
 if(NINTENDO_3DS)
   set(BIN_TARGET ${BIN_TARGET}.elf)
+elseif(TARGET_PLATFORM STREQUAL "dos")
+  set(BIN_TARGET devx)
 endif()
 
-if(ANDROID)
+if(ANDROID AND NOT TERMUX)
   add_library(${BIN_TARGET} SHARED Source/main.cpp)
 elseif(UWP_LIB)
   set(BIN_TARGET libdevilutionx)
@@ -350,12 +391,20 @@ else()
     Packaging/windows/devilutionx.rc
     Packaging/apple/LaunchScreen.storyboard)
 
-    if(CMAKE_STRIP AND NOT DEVILUTIONX_DISABLE_STRIP)
+    if(CMAKE_STRIP AND NOT DEVILUTIONX_DISABLE_STRIP AND NOT EMSCRIPTEN)
       add_custom_command(
         TARGET ${BIN_TARGET} POST_BUILD
         COMMAND $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:${CMAKE_STRIP}>
         ARGS $<TARGET_FILE:${BIN_TARGET}>)
     endif()
+endif()
+
+if(TARGET_PLATFORM STREQUAL "dos")
+    # Allow multiple definitions for math stubs in DJGPP
+    set_target_properties(${BIN_TARGET} PROPERTIES
+        LINK_FLAGS "-Wl,--allow-multiple-definition -static"
+    )
+    target_link_libraries(${BIN_TARGET} PRIVATE m)
 endif()
 
 if(NOT UWP_LIB)
@@ -371,7 +420,19 @@ include(Assets)
 include(Mods)
 
 if(EMSCRIPTEN)
-  target_link_options(${BIN_TARGET} PRIVATE --preload-file assets)
+  target_link_options(${BIN_TARGET} PRIVATE
+    "SHELL:--preload-file assets"
+    "SHELL:--preload-file mods"
+    -sFORCE_FILESYSTEM=1
+    -sALLOW_MEMORY_GROWTH=1
+    -sASYNCIFY
+    -lidbfs.js
+    --shell-file ${CMAKE_CURRENT_SOURCE_DIR}/Packaging/emscripten/index.html
+  )
+
+  add_dependencies(${BIN_TARGET} hellfire_copied_assets)
+  # Add JavaScript to load MPQ files from the server directory at runtime
+  target_link_options(${BIN_TARGET} PRIVATE --pre-js ${CMAKE_CURRENT_SOURCE_DIR}/Packaging/emscripten/emscripten_pre.js)
 endif()
 
 if(NOT USE_SDL1 AND NOT UWP_LIB)
@@ -379,7 +440,7 @@ if(NOT USE_SDL1 AND NOT UWP_LIB)
 endif()
 
 if(BUILD_TESTING)
-  add_subdirectory(test)
+  include(Tests)
 endif()
 
 include(functions/set_relative_file_macro)
@@ -397,10 +458,14 @@ if(APPLE)
   if(IOS)
     set(MACOSX_BUNDLE_REQUIRED_PLATFORM IPhoneOS)
     set_target_properties(${BIN_TARGET} PROPERTIES XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "9.0")
+    # libc++'s <format> requires the floating-point std::to_chars symbols,
+    # which are only available in the iOS 16.3+ system libc++.
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "16.3")
   elseif(DARWIN_MAJOR_VERSION GREATER_EQUAL 17)
     set(MACOSX_BUNDLE_REQUIRED_PLATFORM Carbon)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13.0")
+    # libc++'s <format> requires the floating-point std::to_chars symbols,
+    # which are only available in the macOS 13.3+ system libc++.
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3")
   endif()
   if(DARWIN_MAJOR_VERSION VERSION_LESS 9)
     # Finder on OSX Tiger can only handle icns files with up to 128x128 icons.
@@ -461,6 +526,7 @@ if(VITA)
       NAME ${VITA_APP_NAME}
       FILE Packaging/vita/sce_sys sce_sys
       FILE ${DEVILUTIONX_MPQ} devilutionx.mpq
+      FILE ${HELLFIRE_MPQ} mods/hf.mpq
     )
   else()
     vita_create_vpk(devilutionx.vpk ${VITA_TITLEID} devilutionx.self
@@ -478,6 +544,10 @@ if(PS4)
   add_custom_command(
     TARGET devilutionx_mpq POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy ${DEVILUTIONX_MPQ} "${PROJECT_SOURCE_DIR}/Packaging/ps4/")
+  add_custom_command(
+    TARGET hellfire_mpq POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_SOURCE_DIR}/Packaging/ps4/mods"
+    COMMAND ${CMAKE_COMMAND} -E copy ${HELLFIRE_MPQ} "${PROJECT_SOURCE_DIR}/Packaging/ps4/mods/")
   add_self(${BIN_TARGET})
   add_pkg(${BIN_TARGET} "${PROJECT_SOURCE_DIR}/Packaging/ps4"
     "DVLX00001" "DevilutionX" "${PROJECT_VERSION}")
@@ -566,6 +636,9 @@ if(CPACK AND (APPLE OR BUILD_ASSETS_MPQ OR SRC_DIST))
     install(FILES "${DEVILUTIONX_MPQ}"
       DESTINATION "."
     )
+    install(FILES "${HELLFIRE_MPQ}"
+      DESTINATION "mods"
+    )
 
     foreach(_SDL2_WIN32_DLL_PATH ${SDL2_WIN32_ALL_DLLS} ${WIN32_INSTALL_DLLS})
       install(FILES "${_SDL2_WIN32_DLL_PATH}"
@@ -621,7 +694,10 @@ if(CPACK AND (APPLE OR BUILD_ASSETS_MPQ OR SRC_DIST))
     install(FILES "${DEVILUTIONX_MPQ}"
       DESTINATION "share/diasurgical/${project_name}"
     )
-    install(FILES "${PROJECT_SOURCE_DIR}/Packaging/resources/icon.png"
+    install(FILES "${HELLFIRE_MPQ}"
+      DESTINATION "share/diasurgical/${project_name}/mods"
+    )
+    install(FILES "${PROJECT_SOURCE_DIR}/Packaging/resources/icon_flat.png"
       DESTINATION "share/icons/hicolor/512x512/apps"
       RENAME "${project_name}.png"
     )
