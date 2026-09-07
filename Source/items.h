@@ -180,6 +180,10 @@ enum icreateinfo_flag2 {
 	// clang-format on
 };
 
+// D1Hellforge single-player items can opt out of name reconstruction while
+// retaining the original generation identity and all normal gameplay rules.
+constexpr uint32_t CF_CUSTOM_NAME = 1U << 31;
+
 // All item animation frames have this width.
 constexpr int ItemAnimWidth = 96;
 

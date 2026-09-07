@@ -55,6 +55,8 @@ set(standalone_tests
   file_util_test
   format_int_test
   ini_test
+  item_file_test
+  d1hellforge_item_test
   mod_identity_test
   palette_blending_test
   parse_int_test
@@ -148,6 +150,21 @@ target_link_dependencies(dun_render_benchmark
   unordered_dense::unordered_dense
 )
 target_link_dependencies(file_util_test PRIVATE libdevilutionx_file_util app_fatal_for_testing)
+target_link_dependencies(item_file_test PRIVATE libdevilutionx_item_file)
+target_sources(d1hellforge_item_test PRIVATE
+	"${PROJECT_SOURCE_DIR}/tools/D1Hellforge/devx_adapter.cpp"
+	"${PROJECT_SOURCE_DIR}/tools/D1Hellforge/item_advanced_editor.cpp"
+	"${PROJECT_SOURCE_DIR}/tools/D1Hellforge/item_display.cpp"
+	"${PROJECT_SOURCE_DIR}/tools/D1Hellforge/item_display_win32.cpp"
+	"${PROJECT_SOURCE_DIR}/tools/D1Hellforge/item_catalog.cpp"
+	"${PROJECT_SOURCE_DIR}/tools/D1Hellforge/item_generator.cpp"
+	"${PROJECT_SOURCE_DIR}/tools/D1Hellforge/item_workshop.cpp"
+  "${PROJECT_SOURCE_DIR}/tools/D1Hellforge/item_transfer.cpp"
+  "${PROJECT_SOURCE_DIR}/tools/D1Hellforge/legacy_item_import.cpp"
+	"${PROJECT_SOURCE_DIR}/tools/D1Hellforge/save_document.cpp")
+	target_sources(d1hellforge_item_test PRIVATE "${PROJECT_SOURCE_DIR}/tools/D1Hellforge/stash_document.cpp")
+target_include_directories(d1hellforge_item_test PRIVATE "${PROJECT_SOURCE_DIR}/tools/D1Hellforge")
+target_link_dependencies(d1hellforge_item_test PRIVATE libdevilutionx libdevilutionx_item_file)
 target_link_dependencies(format_int_test PRIVATE libdevilutionx_format_int language_for_testing)
 target_link_dependencies(ini_test PRIVATE libdevilutionx_ini app_fatal_for_testing)
 target_link_dependencies(mod_identity_test PRIVATE libdevilutionx_mod_identity app_fatal_for_testing)

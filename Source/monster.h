@@ -55,15 +55,6 @@ enum monster_flag : uint16_t {
 	MFLAG_ALLY = 1 << 13, // Custom: Marks monster as a player ally
 	// clang-format on
 };
-inline void MakeMonsterAlly(Monster &mon)
-{
-	mon._mFlags |= MFLAG_ALLY;
-}
-
-inline bool IsAlly(const Monster &mon)
-{
-	return (mon._mFlags & MFLAG_ALLY) != 0;
-}
 /** Indexes from UniqueMonstersData array for special unique monsters (usually quest related) */
 enum class UniqueMonsterType : uint8_t {
 	Garbud,
@@ -498,6 +489,16 @@ struct Monster { // note: missing field _mAFNum
 		return hitPoints >> 6 <= 0;
 	}
 };
+
+inline void MakeMonsterAlly(Monster &mon)
+{
+	mon.flags |= MFLAG_ALLY;
+}
+
+inline bool IsAlly(const Monster &mon)
+{
+	return (mon.flags & MFLAG_ALLY) != 0;
+}
 
 extern size_t LevelMonsterTypeCount;
 extern Monster Monsters[MaxMonsters];

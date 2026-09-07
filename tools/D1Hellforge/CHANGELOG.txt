@@ -1,0 +1,209 @@
+D1Hellforge Changelog
+=====================
+
+D1Hellforge v0.3.0 - First stable development release
+------------------------------------------------------
+* Added the user-selected multi-resolution D1Hellforge application/window icon.
+* Added a persistent View menu switch between Diablo UI and Native UI.
+* Styled the five main navigation commands with supplied Hellforge button assets
+  while retaining the original native inventory and stash canvases.
+* Added shared supplied-art rendering for real Windows checkbox and radio-button
+  controls across Character, Workshop, Reforge, and Advanced Item Editor views.
+* Restricted that renderer to the Windows BUTTON class, fixing a test-build
+  regression that placed choice artwork in character fields and detail panels.
+* Preserved native control behavior, keyboard interaction, disabled states, and
+  per-element Native UI fallback. All 46 focused item/file tests pass.
+* Promoted the tested Step 7 checkpoint out of beta and assigned Windows file
+  and product version 0.3.0.0.
+
+D1Hellforge v0.3.0-dev - Step 6 stash actions
+------------------------------------------------
+* Added stash Copy Item, Workshop, Reforge, and Delete Item actions as memory-only
+  previews. Right-click selects the item under the pointer before opening the
+  shared-style action menu.
+* Stash Workshop and Reforge now call the same controller, models, asynchronous
+  search engine, and semantic display pipeline as inventory. Only the storage
+  adapter differs; it preserves stash placement and stages the full item record.
+  I'm Feeling Lucky remains available inside the shared Workshop Edit window.
+* Unified inventory and stash selected-item detail formatting. Completing a
+  stash move now retains the full details, appends the unsaved notice, keeps the
+  item selected, and clears green/red drag state back to the gold selection.
+* Added Make Item from Catalog to stash through the shared Workshop Create path.
+  The stash adapter materializes the complete record and finds a collision-free
+  position on the selected page.
+* Stash copies retain the complete profile-specific item record, allocate a
+  canonical reference, and use shared footprint/collision rules to find space.
+* Stash deletion renumbers later item references and removes empty page records
+  so the serialized stash remains canonical.
+* Stash Direct Edit reuses the existing Advanced Item Editor. No action reaches
+  disk until Save Stash Changes runs the backed-up, reopen-and-verify writer.
+* Added Diablo and Hellfire copy/delete/encode/decode coverage. The focused
+  item/file suite now passes 46/46 tests.
+
+Unreleased - 2026-09-04
+-----------------------
+
+Identity and compatibility
+* Named the locally modified game build DevilutionX-Hellgate so it can be
+  distinguished from stock DevilutionX. Hellgate is a build tag, not a new
+  Diablo/Hellfire content or save mode.
+* Added a documented build switch that retains stock DevilutionX naming and
+  ordinary-item name reconstruction when Hellgate behavior is disabled.
+* Confirmed that a GOG Hellfire single-player save uses the .hsv extension.
+* Confirmed partial read compatibility with a real GOG Hellfire save: the
+  character stats and a basic equipped item can be displayed.
+* GOG/retail inventory writing is NOT supported yet. The verified writer
+  correctly refused the classic save when it could not uniquely locate the
+  DevilutionX active-game inventory block.
+
+Content profiles
+* Added a lightweight ContentProfile for the effective Diablo or Hellfire
+  environment, active packed/built-in content identifiers, loose-content
+  status, truthful display labeling, and initialization state/errors.
+* Threaded the profile through the DevilutionX adapter, catalog, generation,
+  Workshop, loaded character summary, and editor UI.
+* Did not activate arbitrary third-party mods; effective mod loading and
+  verification remain future work.
+
+Items and Workshop
+* Added selectable Fast and Compatible Reforge engines. Fast avoids full summary
+  and display-string construction for rejected candidates; Compatible retains
+  the previous reference behavior. The choice is stored in D1Hellforge.ini.
+* Enlarged Reforge results to show all Top 3 candidates, added full selected-item
+  statistics, and display measured search attempts, rate, and elapsed time.
+* Added graphical equipment, backpack, and belt viewing and movement previews.
+* Added verified item creation, copying, deletion, import, export, editing,
+  deterministic generation, named affixes/uniques, and Workshop reforging.
+* Added .dxitem v2 support for a compact ItemPack plus the complete Diablo or
+  Hellfire single-player item record.
+* Added original 400-byte Diablo ITM01 and Hellfire HIF import/export adapters.
+* Added the "I'm Feeling Lucky" direct editor for stored names, quality,
+  identification, damage, armor, attributes, resistances, life/mana, elemental
+  damage, requirements, durability, charges, value, and related item fields.
+* Preserved unknown serialized bits and blocked unresolved split-identity items
+  instead of silently converting them into vanilla content.
+* Added Hellgate-only custom ordinary-item display names. Stock DevilutionX
+  continues to reconstruct/localize ordinary names; native ear names remain
+  compatible through their compact owner-name representation.
+
+Verified save workflow
+* Character and inventory writes retain the required sequence: timestamped
+  backup, temporary archive write, reopen and verify, replace original, then
+  final verification.
+* DevilutionX inventory saving updates compact hero data, active game data, and
+  full heroitems records where available.
+* Focused Diablo/Hellfire item and file tests currently pass 32/32.
+
+Future Goal - Original/GOG/Retail Backward Compatibility
+---------------------------------------------------------
+
+Status: planned only. No original-game write path is enabled.
+
+Backward compatibility must be implemented as its own translation-layer code
+block, separate from save_document's verified DevilutionX path. The planned
+boundary is tools/D1Hellforge/legacy_save/ and should contain format detection,
+read-only decoding, explicit Diablo-versus-Hellfire mapping, capability reports,
+and eventually independently verified writers.
+
+The translation layer must:
+* Detect DevilutionX, GOG/classic Diablo, and GOG/classic Hellfire from archive
+  evidence rather than filename alone.
+* Translate through a neutral character/item model; it must not reinterpret a
+  classic record as a DevilutionX active-game block.
+* Report which fields each target can preserve, normalize, or cannot represent.
+* Preserve untouched archive members and unknown bytes where the format allows.
+* Keep Diablo and Hellfire layouts distinct and never perform an implicit
+  cross-game conversion.
+* Require representative untouched fixtures plus read, no-change round-trip,
+  edit, backup, temporary-reopen, and final-reopen tests before enabling writes.
+* Keep arbitrary ordinary-item names disabled or clearly warned for targets
+  whose runtime reconstructs them.
+* Refuse mutation whenever the target or record mapping is ambiguous.
+
+First future milestone: collect untouched GOG/retail Diablo and Hellfire saves,
+document their archive entries and layouts, and implement detection plus a
+read-only adapter. Writing remains disabled until that layer is fixture-verified.
+Advanced direct editor layout
+* Began the player-facing "I'm Feeling Lucky" layout: live game-style preview,
+  gameplay-first field order, clearer labels, and an Indestructible convenience
+  control backed by DevilutionX's real stored durability representation.
+* Kept numeric effects separate from flags and generation metadata; Apply still
+  stages the exact full single-player record without silently reforging it.
+
+DevilutionX stash foundation
+* Added a profile-aware reader for DevilutionX shared stash archives, including
+  distinct Diablo and Hellfire full-item record sizes and spawn-save decoding.
+* Added a STASH view with shared-gold and page browsing for all 100 stash pages.
+  This first milestone is intentionally read-only while the dual-file verified
+  transaction needed for safe inventory-to-stash moves is developed.
+* Replaced the initial diagnostic item list with a selectable 10-by-10 stash
+  grid. Multi-cell items occupy their stored cells, and selecting one displays
+  its resolved DevilutionX item details in the side panel.
+* The stash now renders DevilutionX's own `stash.clx` panel artwork and the
+  profile-correct Diablo/Hellfire item cursor sprites at the game's exact stash
+  grid coordinates. The numeric diagnostic placeholders have been removed.
+* Added memory-only stash movement with shared footprint/bounds/collision
+  validation and green/red destination previews.
+* Added exact profile-aware stash serialization and a verified stash writer:
+  timestamped backup, temporary copied archive, decoded payload comparison,
+  replacement only after verification, and a final reopen check. Staged stash
+  moves are saved from the stash right-click menu.
+* Invalid page references, duplicate pages, cross-page item references,
+  unsupported versions, truncated records, and unresolved item identities are
+  rejected or reported rather than normalized into vanilla items.
+* Added focused Diablo and Hellfire stash payload tests. The focused D1Hellforge
+  item/file suite now passes 36/36 tests.
+D1Hellforge v0.3.0-dev
+
+* Added a true exact-seed DevilutionX generation boundary for Fast Reforge.
+  Each examined Fast seed now performs exactly one native generation, verifies
+  that the generated seed matches the requested seed, and applies quality,
+  affix, and effect locks after generation. Compatible Reforge retains the
+  previous search-until-match behavior as a reference path.
+* Updated configurable skill defaults to 512, 4,096, and 32,768 examined seeds
+  for Novice, Competent, and Master Fast Reforge searches.
+* Reforge searches now run on a background worker so the Workshop remains
+  responsive. Live status reports seeds examined, native generations, elapsed
+  performance, and cancellation. Cancel never applies a partial candidate or
+  changes the original item.
+* Item catalog discovery no longer generates every item. It now enumerates the
+  effective DevilutionX item table directly and caches the resulting names and
+  categories by ContentProfile identity. Diablo/Hellfire profile switches
+  invalidate the cache while preserving the editor's existing visible entries.
+* Cached Workshop prefix, suffix, and unique eligibility choices by active
+  ContentProfile, base item, generation level, and vanilla curse-filter mode.
+  Reopening the same Workshop configuration now reuses DevilutionX-derived
+  choices instead of repeatedly rescanning the effective tables.
+* Fixed backpack-to-amulet-slot dragging by validating equipment placement from
+  the native DevilutionX equip location instead of a display string, and made
+  the small neck-slot drop target include its visible border. The selection and
+  drag-preview outlines now align with the rendered neck slot as well.
+* Added the Shared Item Display foundation with structured display modes,
+  semantic sections, and Neutral/Positive/Negative/Warning/Metadata tones.
+  Inventory, equipment, belt, stash, Workshop/Reforge results, and the Advanced
+  Item Editor now receive gameplay text through the same DevilutionX-backed
+  interpretation path. Harmful effects use one shared sign rule and skull-marked
+  plain-text fallback; metadata remains opt-in for detailed diagnostics.
+* Upgraded item-detail hosts to Unicode rich-text panels with a black Diablo-style
+  background, gold general text, orange warnings, and red skull-marked negative
+  effects. Inventory, stash, Workshop, Reforge, and Feeling Lucky now show the
+  Detailed display depth with scrolling where needed.
+* Added a readable [Windows] section to D1Hellforge.ini. MainWidth/MainHeight,
+  ItemWorkshopWidth/ItemWorkshopHeight, and AdvancedEditorWidth/
+  AdvancedEditorHeight control startup sizes for UI testing; unsafe values
+  below each layout's supported minimum are clamped. Older Workshop/Reforge
+  size keys are accepted as migration fallbacks.
+* Unified Create, Edit, and Reforge on one Workshop window size and reorganized
+  the upper workspace into a taller catalog, taller scrolling item-detail panel,
+  and a right-side generation-options column beside the item sprite.
+* Fixed Rich Edit line-color drift by formatting from the control's actual line
+  indexes. A red negative-effect line can no longer partially recolor the next
+  positive line.
+D1Hellforge UI test build
+- Added the supplied D1Hellforge artwork as the executable/window icon.
+- Diablo UI now renders the five main bottom commands with the supplied Hellforge normal, focus, and active/pressed artwork; Native UI remains available from View.
+- Added one shared Hellforge checkbox/radio renderer for Character, Workshop, Reforge, and Advanced Editor while retaining native control behavior and Native UI presentation.
+- Added a live View > Native UI / Diablo UI presentation switch.
+- Added [Appearance] Theme and AllowNativeFallback settings to D1Hellforge.ini.
+- Kept authentic Diablo inventory and DevilutionX stash canvases unchanged.
+- Diablo UI uses the existing restrained gold-on-dark navigation and black/gold information panels; Native UI retains Windows-style command buttons.

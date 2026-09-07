@@ -39,6 +39,7 @@ if(CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg.cmake$")
   option(USE_GETTEXT_FROM_VCPKG "Add vcpkg dependency for gettext[tools] for compiling translations" OFF)
 endif()
 option(BUILD_TESTING "Build tests." ON)
+option(BUILD_D1HELLFORGE "Build the D1Hellforge save editor." ON)
 
 # These must be included after the options above but before the `project` call.
 include(VcPkgManifestFeatures)
@@ -85,6 +86,12 @@ project(DevilutionX
   VERSION ${VERSION_NUM}
   LANGUAGES C CXX)
 set(PROJECT_VERSION_WITH_SUFFIX "${VERSION_PREFIX}${VERSION_SUFFIX}")
+option(DEVILUTIONX_HELLGATE_BUILD "Label and enable the local DevilutionX-Hellgate compatibility build" ON)
+if(DEVILUTIONX_HELLGATE_BUILD)
+  set(DEVILUTIONX_DISPLAY_NAME "DevilutionX-Hellgate")
+else()
+  set(DEVILUTIONX_DISPLAY_NAME "DevilutionX")
+endif()
 
 # Platform definitions can override options and we want `cmake_dependent_option` to see the effects.
 # Note that a few options are still defined before this because they're needed by `VcPkgManifestFeatures.cmake`.
@@ -371,6 +378,10 @@ endif()
 
 add_subdirectory(Source)
 
+if(BUILD_D1HELLFORGE AND WIN32)
+  add_subdirectory(tools/D1Hellforge)
+endif()
+
 set(BIN_TARGET devilutionx)
 if(NINTENDO_3DS)
   set(BIN_TARGET ${BIN_TARGET}.elf)
@@ -390,6 +401,10 @@ else()
     Packaging/windows/devilutionx.exe.manifest
     Packaging/windows/devilutionx.rc
     Packaging/apple/LaunchScreen.storyboard)
+
+    if(DEVILUTIONX_HELLGATE_BUILD)
+      set_target_properties(${BIN_TARGET} PROPERTIES OUTPUT_NAME "devilutionx-hellgate")
+    endif()
 
     if(CMAKE_STRIP AND NOT DEVILUTIONX_DISABLE_STRIP AND NOT EMSCRIPTEN)
       add_custom_command(

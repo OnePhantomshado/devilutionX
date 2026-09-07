@@ -380,6 +380,10 @@ target_link_dependencies(libdevilutionx_file_util PRIVATE
   ${DEVILUTIONX_PLATFORM_FILE_UTIL_LINK_LIBRARIES}
 )
 
+add_devilutionx_object_library(libdevilutionx_item_file
+  utils/item_file.cpp
+)
+
 add_devilutionx_object_library(libdevilutionx_format_int
   utils/format_int.cpp
 )
@@ -1131,12 +1135,17 @@ else()
 endif()
 file(GENERATE OUTPUT ${CONFIG_PATH} CONTENT
 "#pragma once
-#define PROJECT_NAME \"${PROJECT_NAME}\"
+#define PROJECT_NAME \"${DEVILUTIONX_DISPLAY_NAME}\"
 #define PROJECT_VERSION \"${PROJECT_VERSION_WITH_SUFFIX}\"
 #define PROJECT_VERSION_MAJOR ${PROJECT_VERSION_MAJOR}
 #define PROJECT_VERSION_MINOR ${PROJECT_VERSION_MINOR}
 #define PROJECT_VERSION_PATCH ${PROJECT_VERSION_PATCH}
 ")
+
+if(DEVILUTIONX_HELLGATE_BUILD)
+  target_compile_definitions(libdevilutionx PUBLIC DEVILUTIONX_HELLGATE_BUILD)
+  target_compile_definitions(libdevilutionx_items PUBLIC DEVILUTIONX_HELLGATE_BUILD)
+endif()
 
 if(DISCORD_INTEGRATION)
   target_compile_definitions(libdevilutionx PRIVATE DISCORD)

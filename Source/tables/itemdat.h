@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -660,6 +661,8 @@ std::expected<_item_indexes, std::string> ParseItemId(std::string_view value);
 void LoadItemDatFromFile(DataFile &dataFile, std::string_view filename, int32_t baseMappingId);
 void LoadUniqueItemDatFromFile(DataFile &dataFile, std::string_view filename, int32_t baseMappingId);
 void LoadItemData();
+
+std::expected<item_cursor_graphic, std::string> ParseItemCursorGraphicId(std::string_view value);
 
 } // namespace devilution
 

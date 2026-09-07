@@ -475,3 +475,17 @@ uwp-project/Assets/ui_art
 /tmp/
 /compile_commands.json
 /tools/tmp
+
+# D1Hellforge local development and private test material
+/work/
+/AGENTS.md
+/README_DROP_IN.txt
+/START_CODEX.txt
+/docs/d1hellforge/NEW_CHAT_HANDOFF.md
+D1Hellforge.ini
+*.sv
+*.hsv
+*.dsv
+*.dxitem
+*.itm
+*.hif

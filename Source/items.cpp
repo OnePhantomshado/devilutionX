@@ -4847,6 +4847,11 @@ StringOrView Item::getName() const
 	if (isEmpty()) {
 		return std::string_view("");
 	}
+#ifdef DEVILUTIONX_HELLGATE_BUILD
+	if ((dwBuff & CF_CUSTOM_NAME) != 0 && IDidx != IDI_EAR) {
+		return std::string_view(_iIdentified ? _iIName : _iName);
+	}
+#endif
 	if (!_iIdentified || _iCreateInfo == 0 || _iMagical == ITEM_QUALITY_NORMAL) {
 		return GetTranslatedItemName(*this);
 	}

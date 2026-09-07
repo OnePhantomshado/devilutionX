@@ -715,6 +715,11 @@ void LoadItemData()
 	LoadItemAffixesDat("txtdata\\items\\item_suffixes.tsv", ItemSuffixes);
 }
 
+std::expected<item_cursor_graphic, std::string> ParseItemCursorGraphicId(std::string_view value)
+{
+	return ParseItemCursorGraphic(value);
+}
+
 std::string_view ItemTypeToString(ItemType itemType)
 {
 	switch (itemType) {
