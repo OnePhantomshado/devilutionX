@@ -1,10 +1,11 @@
-# Publish DevilutionX-Hellgate with GitHub Desktop
+# Publish DevilutionX-Hellgate With D1Hellforge Save Editor
 
 This folder is a clean Git repository prepared for publication as:
 
 - Repository: `OnePhantomshado/DevilutionX-Hellgate`
 - Branch: `main`
-- Project: DevilutionX-Hellgate with the D1Hellforge save editor and modding platform
+- Public project title: DevilutionX-Hellgate With D1Hellforge Save Editor
+- Project description: A DevilutionX-Hellgate fork with the D1Hellforge save editor and modding platform
 - Upstream: `diasurgical/DevilutionX`
 
 ## 1. Create the GitHub fork

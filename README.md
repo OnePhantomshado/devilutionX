@@ -1,8 +1,9 @@
-# DevilutionX-Hellgate + D1Hellforge
+# DevilutionX-Hellgate With D1Hellforge Save Editor
 
-This repository is the **DevilutionX-Hellgate** fork of DevilutionX. It contains
-the modified Hellgate game build and **D1Hellforge**, a Windows save editor and
-modding platform built on DevilutionX's item, archive, and content logic.
+This repository is the **DevilutionX-Hellgate With D1Hellforge Save Editor**
+project, maintained as a fork of DevilutionX. It contains the modified Hellgate
+game build and **D1Hellforge**, a Windows save editor and modding platform built
+on DevilutionX's item, archive, and content logic.
 
 Hellgate is a build identity, not a third game mode. Diablo and Hellfire remain
 the supported content modes. The project requires data from a legally owned copy
