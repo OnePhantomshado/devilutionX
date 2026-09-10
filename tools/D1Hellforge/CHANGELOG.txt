@@ -3,6 +3,11 @@ D1Hellforge Changelog
 
 D1Hellforge v0.3.0 - First stable development release
 ------------------------------------------------------
+* Game-side change: added the persisted CF_CUSTOM_NAME item marker and taught
+  DevilutionX-Hellgate to display an explicitly stored custom name for marked
+  ordinary items. This allows names created in D1Hellforge to appear in game.
+  Unmarked items still use normal Diablo/Hellfire name reconstruction and
+  localization, and stock DevilutionX behavior is unchanged.
 * Added the user-selected multi-resolution D1Hellforge application/window icon.
 * Added a persistent View menu switch between Diablo UI and Native UI.
 * Styled the five main navigation commands with supplied Hellforge button assets
