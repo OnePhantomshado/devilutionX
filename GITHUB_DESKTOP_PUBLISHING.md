@@ -34,6 +34,10 @@ The finished repository URL should be:
    `Release DevilutionX-Hellgate with D1Hellforge v0.3.0`.
 5. Select **Push origin**.
 
+The new fork initially has upstream's `master` branch, while this prepared work
+is intentionally committed on `main`. The first push creates `main`; it does not
+erase `master`.
+
 The folder is already configured so that:
 
 - `origin` is the OnePhantomshado fork.
@@ -52,6 +56,11 @@ After the push, check that GitHub displays:
 - `tools/D1Hellforge/` source code and changelog.
 - `docs/d1hellforge/` architecture, formats, compatibility, and testing notes.
 - Commit `Release DevilutionX-Hellgate with D1Hellforge v0.3.0` on `main`.
+
+Then open the repository's **Settings > General > Default branch**, switch the
+default branch from `master` to `main`, and confirm the change. Keep `master`
+temporarily as the untouched upstream reference; it can be removed later after
+the public repository has been checked.
 
 Do not upload game MPQs, save files, personal `D1Hellforge.ini` files, build
 directories, or development work folders.
