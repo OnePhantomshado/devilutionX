@@ -41,6 +41,22 @@ D1Hellforge is built as part of this source tree and is located at
 - `.dxitem`, raw ItemPack, Diablo ITM01, and Hellfire HIF item adapters.
 - Diablo-themed and Native UI presentation modes.
 
+## Screenshots
+
+<p align="center">
+  <img width="49%" alt="D1Hellforge graphical inventory" src="docs/images/d1hellforge/inventory.png" />
+  <img width="49%" alt="D1Hellforge shared stash" src="docs/images/d1hellforge/shared-stash.png" />
+</p>
+
+<p align="center">
+  <img width="49%" alt="D1Hellforge Item Workshop" src="docs/images/d1hellforge/item-workshop.png" />
+  <img width="49%" alt="D1Hellforge advanced item editor" src="docs/images/d1hellforge/advanced-item-editor.png" />
+</p>
+
+<p align="center">
+  <img width="70%" alt="D1Hellforge Reforge search" src="docs/images/d1hellforge/reforge.png" />
+</p>
+
 ### Custom item names in game
 
 D1Hellforge can store a custom display name and set the persisted
@@ -51,6 +67,59 @@ changed and does not use this Hellgate-only display behavior.
 
 See the [D1Hellforge changelog](tools/D1Hellforge/CHANGELOG.txt) and
 [Hellgate compatibility notes](docs/d1hellforge/DEVILUTIONX_HELLGATE.md).
+
+## D1Hellforge setup
+
+Place `D1Hellforge.exe`, its supplied runtime files, and the `ui` asset folder
+together. Run the editor once and close it normally. This creates a readable
+`D1Hellforge.ini` beside the executable.
+
+### Pointing the editor to saves
+
+DevilutionX normally stores saves in:
+
+```text
+%APPDATA%\diasurgical\devilution
+```
+
+D1Hellforge uses that location by default. To use another directory, edit the
+following entry while D1Hellforge is closed:
+
+```ini
+[Folders]
+DevilutionXSavePath=C:\Path\To\Your\DevilutionX\Saves
+OriginalGameSavePath=C:\Path\To\Your\Original-GOG\Saves
+ItemLibraryPath=C:\Path\To\Your\D1Hellforge\Item-Library
+```
+
+`DevilutionXSavePath` is the active `.sv`/`.hsv` browsing directory.
+`OriginalGameSavePath` is kept separate for the experimental original-game
+workflow. Selecting a save through **Open Save** also remembers that save's
+folder for the next launch.
+
+### Pointing the editor to MPQ game data
+
+The current v0.3.0 build does **not** have an MPQ-path key in the INI. It safely
+auto-discovers and validates game data instead. Put the required MPQs in one of
+these locations:
+
+1. The same directory as `D1Hellforge.exe`, or one of its parent directories.
+2. The selected save directory, or one of its parent directories.
+3. A standard GOG location such as `C:\GOG Games\Diablo` or
+   `C:\Program Files\GOG Galaxy\Games\Diablo`.
+
+For Diablo graphics, the editor requires `DIABDAT.MPQ`. For Hellfire graphics,
+it also requires `hellfire.mpq`; the editor checks the `hellfire` subdirectory
+as well. A normal Hellfire installation may also contain `hfmonk.mpq`,
+`hfmusic.mpq`, and `hfvoice.mpq` for the game itself.
+
+When discovery succeeds, the Character screen reports the detected game-data
+directory and available Diablo/Hellfire graphics. If validation fails, item
+information remains available with a text/graphics fallback rather than loading
+unverified assets.
+
+Do not commit or redistribute Blizzard MPQ files, personal saves, or an INI that
+contains private paths.
 
 ## Building and testing
 
